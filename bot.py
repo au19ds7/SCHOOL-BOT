@@ -1,23 +1,27 @@
 import asyncio
 import logging
 from datetime import datetime
-from aiogram import Bot, Dispatcher, F
+from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # Токен твого бота
 TOKEN = "8952184969:AAHS21Naqs1Hmtvpvi7Eh-oNcclRZFCMj9Q"
 
-# ID твого чату (або групи), куди бот має слати сповіщення
+# ID твого чату (або групи), куди бот має слати сповіщення та куди пересилати повідомлення з групового чату
 CHAT_ID = None 
+GROUP_CHAT_ID = -100XXXXXXXXXX  # ЗАМІНИ НА ID СВОЄЇ ГРУПИ (має починатися з -100)
 
 # Змінна для керування статусом сповіщень (увімкнено за замовчуванням)
 NOTIFICATIONS_ENABLED = True
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
+router = Router()  # Додаємо роутер для обробників
 scheduler = AsyncIOScheduler(timezone="Europe/Kiev")
 
 # Словники та бази даних в пам'яті
@@ -25,6 +29,10 @@ reminders_list = []      # Список активних та виконаних
 user_creation_step = {}  # Тимчасове збереження кроків створення нагадування
 homework_list = []       # Список домашніх завдань
 hw_creation_step = {}    # Тимчасове збереження кроків запису ДЗ
+
+# Стани для FSM (режим групового чату)
+class ChatStates(StatesGroup):
+    waiting_for_message = State()
 
 # Функція для визначення поточного тижня (1 або 2) за номером тижня року
 def get_current_week():
@@ -67,7 +75,7 @@ def get_subject_with_emoji(name: str) -> str:
     else:
         return f"📖 {name}"
 
-# РОЗКЛАД УРОКІВ (Запис подвійних уроків через тире: "Предмет1 - Предмет2")
+# РОЗКЛАД УРОКІВ
 MONDAY_SCHEDULE = {
     "1": {"time": "08:30 - 09:15", "name": "Англ. мова"},
     "2": {"time": "09:25 - 10:10", "name": "Хімія"},
@@ -119,18 +127,25 @@ FRIDAY_SCHEDULE = {
     "7": {"time": "14:25 - 15:10", "name": "Укр. літ."}
 }
 
-# Головне меню
+# Головне меню (тепер з кнопкою "Груповий чат")
 def get_main_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="📅 Подивитися розклад", callback_data="show_schedule_menu")
     builder.button(text="📚 Домашнє завдання", callback_data="show_homework")
     builder.button(text="📘 ГДЗ", callback_data="show_gdz_menu")
     builder.button(text="⏰ Нагадування", callback_data="show_reminders")
+    builder.button(text="💬 Груповий чат", callback_data="open_group_chat")
     
     notif_text = "🔕 Вимкнути сповіщення" if NOTIFICATIONS_ENABLED else "🔔 Увімкнути сповіщення"
     builder.button(text=notif_text, callback_data="toggle_notifications")
     
-    builder.adjust(1, 2, 1, 1)
+    builder.adjust(1, 2, 1, 1, 1, 1)
+    return builder.as_markup()
+
+# Клавіатура для виходу з групового чату
+def get_back_to_chat_menu_kb():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⬅️ Вийти з чату (в меню)", callback_data="exit_chat")
     return builder.as_markup()
 
 # Меню вибору днів тижня для розкладу
@@ -145,18 +160,20 @@ def get_days_keyboard():
     builder.adjust(2, 2, 1, 1)
     return builder.as_markup()
 
-@dp.message(Command("start"))
-async def cmd_start(message: Message):
+@router.message(Command("start"))
+async def cmd_start(message: Message, state: FSMContext):
     global CHAT_ID
     CHAT_ID = message.chat.id
+    await state.clear()
     status = "увімкнені ✅" if NOTIFICATIONS_ENABLED else "вимкнені ❌"
     await message.answer(
         f"Привіт! Я твій шкільний бот-помічник.\nПоточні сповіщення: {status}",
         reply_markup=get_main_keyboard()
     )
 
-@dp.callback_query(F.data == "back_to_main")
-async def process_back_to_main(callback: CallbackQuery):
+@router.callback_query(F.data == "back_to_main")
+async def process_back_to_main(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
     status = "увімкнені ✅" if NOTIFICATIONS_ENABLED else "вимкнені ❌"
     await callback.message.edit_text(
         f"Головне меню:\nПоточні сповіщення: {status}",
@@ -164,7 +181,7 @@ async def process_back_to_main(callback: CallbackQuery):
     )
     await callback.answer()
 
-@dp.callback_query(F.data == "toggle_notifications")
+@router.callback_query(F.data == "toggle_notifications")
 async def process_toggle_notifications(callback: CallbackQuery):
     global NOTIFICATIONS_ENABLED
     NOTIFICATIONS_ENABLED = not NOTIFICATIONS_ENABLED
@@ -178,7 +195,7 @@ async def process_toggle_notifications(callback: CallbackQuery):
 
 # --- РОЗДІЛ ГДЗ ---
 
-@dp.callback_query(F.data == "show_gdz_menu")
+@router.callback_query(F.data == "show_gdz_menu")
 async def process_gdz_menu(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.button(text="🇺🇦 Українська мова (Заболотний)", url="https://4book.org/gdz-reshebniki-ukraina/9-klas/gdz-ukrayinska-mova-9-klas-zabolotniy-nush-2026")
@@ -196,7 +213,7 @@ async def process_gdz_menu(callback: CallbackQuery):
 
 # --- РОЗДІЛ ДОМАШНІХ ЗАВДАНЬ (ДЗ) ---
 
-@dp.callback_query(F.data == "show_homework")
+@router.callback_query(F.data == "show_homework")
 async def process_homework_menu(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.button(text="✍️ Записати ДЗ", callback_data="create_homework")
@@ -219,7 +236,7 @@ async def process_homework_menu(callback: CallbackQuery):
     )
     await callback.answer()
 
-@dp.callback_query(F.data == "create_homework")
+@router.callback_query(F.data == "create_homework")
 async def process_create_homework(callback: CallbackQuery):
     hw_creation_step[callback.from_user.id] = {}
     
@@ -240,7 +257,7 @@ async def process_create_homework(callback: CallbackQuery):
     )
     await callback.answer()
 
-@dp.callback_query(F.data.startswith("hw_day_"))
+@router.callback_query(F.data.startswith("hw_day_"))
 async def process_hw_day_chosen(callback: CallbackQuery):
     user_id = callback.from_user.id
     if user_id not in hw_creation_step:
@@ -261,7 +278,7 @@ async def process_hw_day_chosen(callback: CallbackQuery):
     )
     await callback.answer()
 
-@dp.callback_query(F.data.startswith("del_hw_"))
+@router.callback_query(F.data.startswith("del_hw_"))
 async def process_delete_homework(callback: CallbackQuery):
     hw_id = int(callback.data.split("_")[2])
     global homework_list
@@ -270,7 +287,7 @@ async def process_delete_homework(callback: CallbackQuery):
 
 # --- РОЗДІЛ НАГАДУВАНЬ ---
 
-@dp.callback_query(F.data == "show_reminders")
+@router.callback_query(F.data == "show_reminders")
 async def process_reminders_menu(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.button(text="➕ Створити нагадування", callback_data="create_reminder")
@@ -302,7 +319,7 @@ async def process_reminders_menu(callback: CallbackQuery):
     )
     await callback.answer()
 
-@dp.callback_query(F.data == "create_reminder")
+@router.callback_query(F.data == "create_reminder")
 async def process_create_reminder(callback: CallbackQuery):
     user_creation_step[callback.from_user.id] = {"step": "waiting_text"}
     builder = InlineKeyboardBuilder()
@@ -328,7 +345,7 @@ def get_reminder_days_keyboard():
     builder.adjust(2, 2, 2, 1, 1)
     return builder.as_markup()
 
-@dp.callback_query(F.data.startswith("rem_day_"))
+@router.callback_query(F.data.startswith("rem_day_"))
 async def process_reminder_day_chosen(callback: CallbackQuery):
     user_id = callback.from_user.id
     if user_id not in user_creation_step:
@@ -360,7 +377,7 @@ async def process_reminder_day_chosen(callback: CallbackQuery):
     )
     await callback.answer()
 
-@dp.callback_query(F.data.startswith("done_rem_"))
+@router.callback_query(F.data.startswith("done_rem_"))
 async def process_mark_done(callback: CallbackQuery):
     rem_id = int(callback.data.split("_")[2])
     for item in reminders_list:
@@ -368,11 +385,58 @@ async def process_mark_done(callback: CallbackQuery):
             item['done'] = True
     await process_reminders_menu(callback)
 
-# Загальний обробник текстових повідомлень (для нагадувань та домашніх завдань)
-@dp.message(F.text & ~F.text.startswith("/"))
-async def handle_text_inputs(message: Message):
+
+# --- ЛОГІКА ГРУПОВОГО ЧАТУ (НОВЕ) ---
+
+@router.callback_query(F.data == "open_group_chat")
+async def open_group_chat_handler(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(ChatStates.waiting_for_message)
+    await callback.message.edit_text(
+        "💬 **Ти увійшов у груповий чат!**\n\n"
+        "Будь-яке твоє повідомлення (текст чи фото) буде автоматично надіслано в загальну групу разом із твоїм ніком.\n\n"
+        "Напиши щось або надішли фото:",
+        reply_markup=get_back_to_chat_menu_kb(),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+@router.callback_query(F.data == "exit_chat")
+async def exit_chat_handler(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    status = "увімкнені ✅" if NOTIFICATIONS_ENABLED else "вимкнені ❌"
+    await callback.message.edit_text(
+        f"Ти вийшов із групового чату.\nГоловне меню:\nПоточні сповіщення: {status}",
+        reply_markup=get_main_keyboard()
+    )
+    await callback.answer()
+
+
+# Загальний обробник текстових повідомлень та фото
+@router.message(F.text & ~F.text.startswith("/"))
+async def handle_text_inputs(message: Message, state: FSMContext):
     user_id = message.from_user.id
+    current_state = await state.get_state()
     
+    # 0. Перевірка чи користувач перебуває у режимі групового чату
+    if current_state == ChatStates.waiting_for_message.state:
+        user = message.from_user
+        username_str = f"@{user.username}" if user.username else "без юзернейму"
+        user_link = f"<a href='tg://user?id={user.id}'>{user.first_name}</a>"
+        header = f"💬 <b>Повідомлення від {user_link}</b> ({username_str}):\n"
+
+        try:
+            if message.text:
+                await bot.send_message(
+                    chat_id=GROUP_CHAT_ID,
+                    text=header + message.text,
+                    parse_mode="HTML"
+                )
+            await message.answer("✅ Надіслано в чат!", reply_markup=get_back_to_chat_menu_kb())
+        except Exception as e:
+            logging.error(f"Помилка при пересиланні тексту: {e}")
+            await message.answer("❌ Сталася помилка при відправці у загальний чат.")
+        return
+
     # 1. Перевірка чи створюється ДЗ
     if user_id in hw_creation_step and hw_creation_step[user_id].get("step") == "waiting_text":
         day = hw_creation_step[user_id]["day"]
@@ -396,11 +460,11 @@ async def handle_text_inputs(message: Message):
 
     # 2. Перевірка чи створюється нагадування
     if user_id in user_creation_step:
-        state = user_creation_step[user_id]
+        st = user_creation_step[user_id]
         
-        if state["step"] == "waiting_text":
-            state["text"] = message.text
-            state["step"] = "waiting_day"
+        if st["step"] == "waiting_text":
+            st["text"] = message.text
+            st["step"] = "waiting_day"
             
             await message.answer(
                 "📌 **Коли нагадати?**\nОберіть день тижня:",
@@ -408,7 +472,7 @@ async def handle_text_inputs(message: Message):
                 parse_mode="Markdown"
             )
             
-        elif state["step"] == "waiting_time":
+        elif st["step"] == "waiting_time":
             time_text = message.text.strip()
             try:
                 hour_str, minute_str = time_text.split(":")
@@ -423,8 +487,8 @@ async def handle_text_inputs(message: Message):
             rem_id = len(reminders_list) + 1
             new_reminder = {
                 "id": rem_id,
-                "text": state["text"],
-                "day_name": state["day_name"],
+                "text": st["text"],
+                "day_name": st["day_name"],
                 "time": time_text,
                 "done": False
             }
@@ -433,7 +497,7 @@ async def handle_text_inputs(message: Message):
             scheduler.add_job(
                 send_user_reminder,
                 'cron',
-                day_of_week=state["day_cron"],
+                day_of_week=st["day_cron"],
                 hour=hour,
                 minute=minute,
                 args=[rem_id]
@@ -452,6 +516,32 @@ async def handle_text_inputs(message: Message):
                 parse_mode="Markdown"
             )
 
+
+# Обробник фотографій для групового чату
+@router.message(F.photo)
+async def handle_photo_inputs(message: Message, state: FSMContext):
+    current_state = await state.get_state()
+    if current_state == ChatStates.waiting_for_message.state:
+        user = message.from_user
+        username_str = f"@{user.username}" if user.username else "без юзернейму"
+        user_link = f"<a href='tg://user?id={user.id}'>{user.first_name}</a>"
+        header = f"💬 <b>Повідомлення від {user_link}</b> ({username_str}):\n"
+
+        try:
+            photo_file_id = message.photo[-1].file_id
+            caption = message.caption if message.caption else ""
+            await bot.send_photo(
+                chat_id=GROUP_CHAT_ID,
+                photo=photo_file_id,
+                caption=header + caption,
+                parse_mode="HTML"
+            )
+            await message.answer("✅ Фото успішно надіслано в чат!", reply_markup=get_back_to_chat_menu_kb())
+        except Exception as e:
+            logging.error(f"Помилка при пересиланні фото: {e}")
+            await message.answer("❌ Сталася помилка при відправці фото у загальний чат.")
+
+
 async def send_user_reminder(rem_id: int):
     if not CHAT_ID or not NOTIFICATIONS_ENABLED:
         return
@@ -463,7 +553,7 @@ async def send_user_reminder(rem_id: int):
 
 # --- РОЗКЛАД УРОКІВ ---
 
-@dp.callback_query(F.data == "show_schedule_menu")
+@router.callback_query(F.data == "show_schedule_menu")
 async def process_schedule_menu(callback: CallbackQuery):
     await callback.message.edit_text(
         "Обери день тижня:",
@@ -478,7 +568,6 @@ async def show_schedule_text(callback: CallbackQuery, schedule_dict: dict, day_n
     for num, lesson in schedule_dict.items():
         raw_name = lesson['name']
         
-        # Перевіряємо чи урок містить тире "-"
         if " - " in raw_name:
             parts = raw_name.split(" - ")
             part1 = parts[0].strip()
@@ -499,29 +588,32 @@ async def show_schedule_text(callback: CallbackQuery, schedule_dict: dict, day_n
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
     await callback.answer()
 
-@dp.callback_query(F.data == "day_monday")
+@router.callback_query(F.data == "day_monday")
 async def process_monday(callback: CallbackQuery):
     await show_schedule_text(callback, MONDAY_SCHEDULE, "понеділок")
 
-@dp.callback_query(F.data == "day_tuesday")
+@router.callback_query(F.data == "day_tuesday")
 async def process_tuesday(callback: CallbackQuery):
     await show_schedule_text(callback, TUESDAY_SCHEDULE, "вівторок")
 
-@dp.callback_query(F.data == "day_wednesday")
+@router.callback_query(F.data == "day_wednesday")
 async def process_wednesday(callback: CallbackQuery):
     await show_schedule_text(callback, WEDNESDAY_SCHEDULE, "середу")
 
-@dp.callback_query(F.data == "day_thursday")
+@router.callback_query(F.data == "day_thursday")
 async def process_thursday(callback: CallbackQuery):
     await show_schedule_text(callback, THURSDAY_SCHEDULE, "четвер")
 
-@dp.callback_query(F.data == "day_friday")
+@router.callback_query(F.data == "day_friday")
 async def process_friday(callback: CallbackQuery):
     await show_schedule_text(callback, FRIDAY_SCHEDULE, "п'ятницю")
 
 async def main():
     logging.basicConfig(level=logging.INFO)
     scheduler.start()
+    
+    # Реєструємо роутер у диспетчері
+    dp.include_router(router)
     
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
