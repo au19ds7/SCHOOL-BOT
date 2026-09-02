@@ -24,49 +24,63 @@ scheduler = AsyncIOScheduler(timezone="Europe/Kiev")
 reminders_list = []      # Список активних та виконаних нагадувань
 user_creation_step = {}  # Тимчасове збереження кроків створення нагадування
 
-# Розклад на вівторок (з учителями)
+# Функція для визначення поточного тижня (1 або 2) за номером тижня року
+def get_current_week():
+    week_number = datetime.now().isocalendar()[1]
+    return 1 if week_number % 2 != 0 else 2
+
+# НОВИЙ РОЗКЛАД УРОКІВ (Формат: [Урок 1 тижня, Урок 2 тижня])
+# Якщо предмет один, обидва значення однакові.
+
+MONDAY_SCHEDULE = {
+    "1": {"time": "08:30 - 09:15", "name": ["Англ. мова", "Англ. мова"]},
+    "2": {"time": "09:25 - 10:10", "name": ["Хімія", "Хімія"]},
+    "3": {"time": "10:25 - 11:10", "name": ["Укр. мова", "Укр. мова"]},
+    "4": {"time": "11:30 - 12:15", "name": ["Ф-ра", "Ф-ра"]},
+    "5": {"time": "12:35 - 13:20", "name": ["Фізика", "Фізика"]},
+    "6": {"time": "13:30 - 14:15", "name": ["Зарубіжна", "Зарубіжна"]},
+    "7": {"time": "14:25 - 15:10", "name": ["Фізика 2х", "Фізика 2х"]}
+}
+
 TUESDAY_SCHEDULE = {
-    "1": {"time": "08:30 - 09:15", "name": "Алгебра", "teacher": "Оксана Миколаївна"},
-    "2": {"time": "09:25 - 10:10", "name": "Українська мова", "teacher": "Ольга Степанівна"},
-    "3": {"time": "10:25 - 11:10", "name": "Алгебра", "teacher": "Оксана Миколаївна"},
-    "4": {"time": "11:30 - 12:15", "name": "Всесвітня історія", "teacher": "Іванна Богданівна"},
-    "5": {"time": "12:35 - 13:20", "name": "Інформатика", "teacher": "Оксана Миколаївна"},
-    "6": {"time": "13:30 - 14:15", "name": "Технології", "teacher": "Іванна Петрівна"},
-    "7": {"time": "14:25 - 15:10", "name": "Біологія", "teacher": "Надія Григорівна"},
-    "8": {"time": "15:20 - 16:05", "name": "Мистецтво", "teacher": "Ірина Василівна"}
+    "1": {"time": "08:30 - 09:15", "name": ["Англ.", "Матем. ат."]},
+    "2": {"time": "09:25 - 10:10", "name": ["Укр. мова", "Укр. мова"]},
+    "3": {"time": "10:25 - 11:10", "name": ["Матем. а.", "Матем. а."]},
+    "4": {"time": "11:30 - 12:15", "name": ["Історія", "Історія"]},
+    "5": {"time": "12:35 - 13:20", "name": ["Інфор.", "Інфор."]},
+    "6": {"time": "13:30 - 14:15", "name": ["Технології", "Технології"]},
+    "7": {"time": "14:25 - 15:10", "name": ["Біологія", "Біологія"]},
+    "8": {"time": "15:20 - 16:05", "name": ["Мист.", "Мист."]}
 }
 
-# Розклад на середу
 WEDNESDAY_SCHEDULE = {
-    "1": {"time": "08:30 - 09:15", "name": "Англійська мова", "teacher": "Галина Зиновіївна"},
-    "2": {"time": "09:25 - 10:10", "name": "Українська мова", "teacher": "Ольга Степанівна"},
-    "3": {"time": "10:25 - 11:10", "name": "Фізика", "teacher": "Ірина Володимирівна"},
-    "4": {"time": "11:30 - 12:15", "name": "Вікно / Самостійна", "teacher": "-"},
-    "5": {"time": "12:35 - 13:20", "name": "Польська мова", "teacher": "Людмила Петрівна"},
-    "6": {"time": "13:30 - 14:15", "name": "Геометрія", "teacher": "Оксана Миколаївна"},
-    "7": {"time": "14:25 - 15:10", "name": "Українська література", "teacher": "Наталія Вікторівна"}
+    "1": {"time": "08:30 - 09:15", "name": ["Англ. мова", "Англ. мова"]},
+    "2": {"time": "09:25 - 10:10", "name": ["Укр. мова", "Польська"]},
+    "3": {"time": "10:25 - 11:10", "name": ["Фізика", "Фізика"]},
+    "4": {"time": "11:30 - 12:15", "name": ["Ф-ра", "Ф-ра"]},
+    "5": {"time": "12:35 - 13:20", "name": ["Укр. мова", "Польська"]},
+    "6": {"time": "13:30 - 14:15", "name": ["Матем. геом.", "Матем. геом."]},
+    "7": {"time": "14:25 - 15:10", "name": ["Укр. літ.", "Укр. літ."]}
 }
 
-# Розклад на четвер
 THURSDAY_SCHEDULE = {
-    "1": {"time": "08:30 - 09:15", "name": "Інтегрований курс \"Здоров'я, безпека та добробут\"", "teacher": "Надія Григорівна"},
-    "2": {"time": "09:25 - 10:10", "name": "Вікно / Самостійна", "teacher": "-"},
-    "3": {"time": "10:25 - 11:10", "name": "Англійська мова", "teacher": "Галина Зиновіївна"},
-    "4": {"time": "11:30 - 12:15", "name": "Алгебра", "teacher": "Оксана Миколаївна"},
-    "5": {"time": "12:35 - 13:20", "name": "Історія України", "teacher": "Іванна Богданівна"},
-    "6": {"time": "13:30 - 14:15", "name": "Інформатика", "teacher": "Оксана Миколаївна"},
-    "7": {"time": "14:25 - 15:10", "name": "Геометрія", "teacher": "Оксана Миколаївна"}
+    "1": {"time": "08:30 - 09:15", "name": ["ЗБД / ПРГ", "ЗБД / ПРГ"]},
+    "2": {"time": "09:25 - 10:10", "name": ["Ф-ра", "Ф-ра"]},
+    "3": {"time": "10:25 - 11:10", "name": ["Англ. мова", "Англ. мова"]},
+    "4": {"time": "11:30 - 12:15", "name": ["Математика а.", "Математика а."]},
+    "5": {"time": "12:35 - 13:20", "name": ["Історія", "Історія"]},
+    "6": {"time": "13:30 - 14:15", "name": ["Інфор. / Історія", "Інфор. / Історія"]},
+    "7": {"time": "14:25 - 15:10", "name": ["Матем. ат.", "Матем. ат."]}
 }
 
-# Розклад на п'ятницю
 FRIDAY_SCHEDULE = {
-    "1": {"time": "08:30 - 09:15", "name": "Хімія", "teacher": "Володимир Леонідович"},
-    "2": {"time": "09:25 - 10:10", "name": "Українська мова", "teacher": "Ольга Степанівна"},
-    "3": {"time": "10:25 - 11:10", "name": "Біологія", "teacher": "Надія Григорівна"},
-    "4": {"time": "11:30 - 12:15", "name": "Польська мова", "teacher": "Людмила Петрівна"},
-    "5": {"time": "12:35 - 13:20", "name": "Вікно / Самостійна", "teacher": "-"},
-    "6": {"time": "13:30 - 14:15", "name": "Географія", "teacher": "Тетяна Федорівna"},
-    "7": {"time": "14:25 - 15:10", "name": "Українська література", "teacher": "Наталія Вікторівна"}
+    "1": {"time": "08:30 - 09:15", "name": ["Хімія", "Хімія"]},
+    "2": {"time": "09:25 - 10:10", "name": ["Укр. мова", "Польська"]},
+    "3": {"time": "10:25 - 11:10", "name": ["Біологія", "Біологія"]},
+    "4": {"time": "11:30 - 12:15", "name": ["Укр. мова", "Польська"]},
+    "5": {"time": "12:35 - 13:20", "name": ["Історія", "Історія"]},
+    "6": {"time": "13:30 - 14:15", "name": ["Географія", "Географія"]},
+    "7": {"time": "14:25 - 15:10", "name": ["Укр. літ.", "Укр. літ."]}
 }
 
 # Головне меню
@@ -131,17 +145,15 @@ async def process_reminders_menu(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.button(text="➕ Створити нагадування", callback_data="create_reminder")
     
-    # Виводимо активні нагадування
     active_text = "📌 **Активні нагадування:**\n"
     active_items = [r for r in reminders_list if not r['done']]
     if not active_items:
         active_text += "_Немає активних нагадувань_\n"
     else:
-        for idx, item in enumerate(active_items):
+        for item in active_items:
             active_text += f"• {item['text']} (📅 {item['day_name']} о {item['time']})\n"
             builder.button(text=f"✅ Виконати: {item['text'][:15]}...", callback_data=f"done_rem_{item['id']}")
 
-    # Виводимо список зробленого
     done_text = "\n📋 **Виконані нагадування:**\n"
     done_items = [r for r in reminders_list if r['done']]
     if not done_items:
@@ -173,7 +185,6 @@ async def process_create_reminder(callback: CallbackQuery):
     )
     await callback.answer()
 
-# Вибір дня тижня для нагадування
 def get_reminder_days_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="Понеділок", callback_data="rem_day_mon")
@@ -227,21 +238,17 @@ async def process_mark_done(callback: CallbackQuery):
             item['done'] = True
     await process_reminders_menu(callback)
 
-# Текстові обробники для створення нагадувань (що і коли)
 @dp.message(F.text & ~F.text.startswith("/"))
 async def handle_text_inputs(message: Message):
     user_id = message.from_user.id
     if user_id not in user_creation_step:
-        return # Якщо користувач пише щось інше не у процесі створення нагадування
+        return
     
     state = user_creation_step[user_id]
     
     if state["step"] == "waiting_text":
         state["text"] = message.text
         state["step"] = "waiting_day"
-        
-        builder = InlineKeyboardBuilder()
-        builder.button(text="❌ Скасувати", callback_data="show_reminders")
         
         await message.answer(
             "📌 **Коли нагадати?**\nОберіть день тижня:",
@@ -261,7 +268,6 @@ async def handle_text_inputs(message: Message):
             await message.answer("❌ Неправильний формат часу. Введіть у форматі Година:Хвилина, наприклад `14:30`:", parse_mode="Markdown")
             return
         
-        # Зберігаємо нагадування
         rem_id = len(reminders_list) + 1
         new_reminder = {
             "id": rem_id,
@@ -272,7 +278,6 @@ async def handle_text_inputs(message: Message):
         }
         reminders_list.append(new_reminder)
         
-        # Додаємо задачу в планувальник (apscheduler)
         scheduler.add_job(
             send_user_reminder,
             'cron',
@@ -315,18 +320,23 @@ async def process_schedule_menu(callback: CallbackQuery):
     await callback.answer()
 
 async def show_schedule_text(callback: CallbackQuery, schedule_dict: dict, day_name: str):
-    text = f"📅 **Розклад на {day_name}:**\n\n"
+    current_week = get_current_week()
+    text = f"📅 **Розклад на {day_name}** (Зараз іде **{current_week}-й тиждень**):\n\n"
+    
     for num, lesson in schedule_dict.items():
-        if lesson['teacher'] != "-":
-            text += f"🔹 **{num}. {lesson['name']}** ({lesson['time']})\n   👤 _{lesson['teacher']}_\n\n"
-        else:
-            text += f"🔹 **{num}. {lesson['name']}** ({lesson['time']})\n\n"
+        # Вибираємо предмет залежно від тижня (індекс 0 для 1-го тижня, індекс 1 для 2-го)
+        lesson_name = lesson['name'][0] if current_week == 1 else lesson['name'][1]
+        text += f"🔹 **{num}. {lesson_name}** ({lesson['time']})\n\n"
     
     builder = InlineKeyboardBuilder()
     builder.button(text="⬅️ Назад до днів", callback_data="show_schedule_menu")
     
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
     await callback.answer()
+
+@dp.callback_query(F.data == "day_monday")
+async def process_monday(callback: CallbackQuery):
+    await show_schedule_text(callback, MONDAY_SCHEDULE, "понеділок")
 
 @dp.callback_query(F.data == "day_tuesday")
 async def process_tuesday(callback: CallbackQuery):
@@ -344,101 +354,15 @@ async def process_thursday(callback: CallbackQuery):
 async def process_friday(callback: CallbackQuery):
     await show_schedule_text(callback, FRIDAY_SCHEDULE, "п'ятницю")
 
-@dp.callback_query(F.data == "day_monday")
-async def process_other_days(callback: CallbackQuery):
+@dp.callback_query(F.data == "day_sat")
+async def process_saturday(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.button(text="⬅️ Назад до днів", callback_data="show_schedule_menu")
-    
-    await callback.message.edit_text(
-        "Цей день поки що не додано в розклад.",
-        reply_markup=builder.as_markup()
-    )
+    await callback.message.edit_text("📅 **Субота:** Вихідний день! 🏖️", reply_markup=builder.as_markup(), parse_mode="Markdown")
     await callback.answer()
-
-# Сповіщення про початок уроку
-async def send_lesson_start_notification(day_schedule: dict, lesson_number: str):
-    if not CHAT_ID or not NOTIFICATIONS_ENABLED:
-        return
-    
-    lesson = day_schedule.get(lesson_number)
-    if lesson and lesson['name'] != "Вікно / Самостійна":
-        text = (
-            f"🔔 **Урок {lesson_number}: {lesson['name']} почався!**\n\n"
-            f"⏰ Час: {lesson['time']}\n"
-            f"👤 Вчитель: {lesson['teacher']}"
-        )
-        await bot.send_message(CHAT_ID, text, parse_mode="Markdown")
-
-# Сповіщення про кінець уроку
-async def send_lesson_end_notification(day_schedule: dict, lesson_number: str):
-    if not CHAT_ID or not NOTIFICATIONS_ENABLED:
-        return
-    
-    lesson = day_schedule.get(lesson_number)
-    if lesson and lesson['name'] != "Вікно / Самостійна":
-        text = (
-            f"🔕 **Урок {lesson_number}: {lesson['name']} закінчився!**"
-        )
-        await bot.send_message(CHAT_ID, text, parse_mode="Markdown")
-
-# Налаштування розкладу уроків у планувальнику
-def setup_scheduler():
-    tue_schedule_data = [
-        ('8', '30', '9', '15', '1'),
-        ('9', '25', '10', '10', '2'),
-        ('10', '25', '11', '10', '3'),
-        ('11', '30', '12', '15', '4'),
-        ('12', '35', '13', '20', '5'),
-        ('13', '30', '14', '15', '6'),
-        ('14', '25', '15', '10', '7'),
-        ('15', '20', '16', '05', '8')
-    ]
-    for start_h, start_m, end_h, end_m, num in tue_schedule_data:
-        scheduler.add_job(send_lesson_start_notification, 'cron', day_of_week='tue', hour=start_h, minute=start_m, args=[TUESDAY_SCHEDULE, num])
-        scheduler.add_job(send_lesson_end_notification, 'cron', day_of_week='tue', hour=end_h, minute=end_m, args=[TUESDAY_SCHEDULE, num])
-
-    wed_schedule_data = [
-        ('8', '30', '9', '15', '1'),
-        ('9', '25', '10', '10', '2'),
-        ('10', '25', '11', '10', '3'),
-        ('11', '30', '12', '15', '4'),
-        ('12', '35', '13', '20', '5'),
-        ('13', '30', '14', '15', '6'),
-        ('14', '25', '15', '10', '7')
-    ]
-    for start_h, start_m, end_h, end_m, num in wed_schedule_data:
-        scheduler.add_job(send_lesson_start_notification, 'cron', day_of_week='wed', hour=start_h, minute=start_m, args=[WEDNESDAY_SCHEDULE, num])
-        scheduler.add_job(send_lesson_end_notification, 'cron', day_of_week='wed', hour=end_h, minute=end_m, args=[WEDNESDAY_SCHEDULE, num])
-
-    thu_schedule_data = [
-        ('8', '30', '9', '15', '1'),
-        ('9', '25', '10', '10', '2'),
-        ('10', '25', '11', '10', '3'),
-        ('11', '30', '12', '15', '4'),
-        ('12', '35', '13', '20', '5'),
-        ('13', '30', '14', '15', '6'),
-        ('14', '25', '15', '10', '7')
-    ]
-    for start_h, start_m, end_h, end_m, num in thu_schedule_data:
-        scheduler.add_job(send_lesson_start_notification, 'cron', day_of_week='thu', hour=start_h, minute=start_m, args=[THURSDAY_SCHEDULE, num])
-        scheduler.add_job(send_lesson_end_notification, 'cron', day_of_week='thu', hour=end_h, minute=end_m, args=[THURSDAY_SCHEDULE, num])
-
-    fri_schedule_data = [
-        ('8', '30', '9', '15', '1'),
-        ('9', '25', '10', '10', '2'),
-        ('10', '25', '11', '10', '3'),
-        ('11', '30', '12', '15', '4'),
-        ('12', '35', '13', '20', '5'),
-        ('13', '30', '14', '15', '6'),
-        ('14', '25', '15', '10', '7')
-    ]
-    for start_h, start_m, end_h, end_m, num in fri_schedule_data:
-        scheduler.add_job(send_lesson_start_notification, 'cron', day_of_week='fri', hour=start_h, minute=start_m, args=[FRIDAY_SCHEDULE, num])
-        scheduler.add_job(send_lesson_end_notification, 'cron', day_of_week='fri', hour=end_h, minute=end_m, args=[FRIDAY_SCHEDULE, num])
 
 async def main():
     logging.basicConfig(level=logging.INFO)
-    setup_scheduler()
     scheduler.start()
     
     await bot.delete_webhook(drop_pending_updates=True)
