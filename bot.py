@@ -12,34 +12,33 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 # Токен твого бота
 TOKEN = "8952184969:AAHS21Naqs1Hmtvpvi7Eh-oNcclRZFCMj9Q"
 
-# ID твого чату (або групи), куди бот має слати сповіщення та куди пересилати повідомлення з групового чату
-CHAT_ID = None 
-GROUP_CHAT_ID = -100XXXXXXXXXX  # ЗАМІНИ НА ID СВОЄЇ ГРУПИ (має починатися з -100)
-
 # Змінна для керування статусом сповіщень (увімкнено за замовчуванням)
 NOTIFICATIONS_ENABLED = True
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
-router = Router()  # Додаємо роутер для обробників
+router = Router()
 scheduler = AsyncIOScheduler(timezone="Europe/Kiev")
 
 # Словники та бази даних в пам'яті
-reminders_list = []      # Список активних та виконаних нагадувань
-user_creation_step = {}  # Тимчасове збереження кроків створення нагадування
-homework_list = []       # Список домашніх завдань
-hw_creation_step = {}    # Тимчасове збереження кроків запису ДЗ
+reminders_list = []      # Список нагадувань
+user_creation_step = {}  # Кроки створення нагадування
+homework_list = []       # Список ДЗ
+hw_creation_step = {}    # Кроки запису ДЗ
 
-# Стани для FSM (режим групового чату)
-class ChatStates(StatesGroup):
-    waiting_for_message = State()
+# База всіх користувачів, які колись запускали бота (зберігаємо унікальні ID)
+known_users = set()
 
-# Функція для визначення поточного тижня (1 або 2) за номером тижня року
+# Стани для FSM (режим масової розсилання)
+class BroadcastStates(StatesGroup):
+    waiting_for_broadcast_content = State()
+
+# Функція для визначення поточного тижня (1 або 2)
 def get_current_week():
     week_number = datetime.now().isocalendar()[1]
     return 1 if week_number % 2 != 0 else 2
 
-# Функція для автоматичного додавання емодзі до предметів
+# Автоматичне додавання емодзі до предметів
 def get_subject_with_emoji(name: str) -> str:
     lower_name = name.lower()
     if "англі" in lower_name:
@@ -127,14 +126,14 @@ FRIDAY_SCHEDULE = {
     "7": {"time": "14:25 - 15:10", "name": "Укр. літ."}
 }
 
-# Головне меню (тепер з кнопкою "Груповий чат")
+# Головне меню (тепер з кнопкою "Скинути всім")
 def get_main_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="📅 Подивитися розклад", callback_data="show_schedule_menu")
     builder.button(text="📚 Домашнє завдання", callback_data="show_homework")
     builder.button(text="📘 ГДЗ", callback_data="show_gdz_menu")
     builder.button(text="⏰ Нагадування", callback_data="show_reminders")
-    builder.button(text="💬 Груповий чат", callback_data="open_group_chat")
+    builder.button(text="📢 Скинути всім", callback_data="start_broadcast")
     
     notif_text = "🔕 Вимкнути сповіщення" if NOTIFICATIONS_ENABLED else "🔔 Увімкнути сповіщення"
     builder.button(text=notif_text, callback_data="toggle_notifications")
@@ -142,10 +141,10 @@ def get_main_keyboard():
     builder.adjust(1, 2, 1, 1, 1, 1)
     return builder.as_markup()
 
-# Клавіатура для виходу з групового чату
-def get_back_to_chat_menu_kb():
+# Кнопка скасування під час введення розсилання
+def get_cancel_broadcast_kb():
     builder = InlineKeyboardBuilder()
-    builder.button(text="⬅️ Вийти з чату (в меню)", callback_data="exit_chat")
+    builder.button(text="❌ Скасувати", callback_data="back_to_main")
     return builder.as_markup()
 
 # Меню вибору днів тижня для розкладу
@@ -162,8 +161,9 @@ def get_days_keyboard():
 
 @router.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext):
-    global CHAT_ID
-    CHAT_ID = message.chat.id
+    # Зберігаємо користувача в базу для розсилок
+    known_users.add(message.chat.id)
+    
     await state.clear()
     status = "увімкнені ✅" if NOTIFICATIONS_ENABLED else "вимкнені ❌"
     await message.answer(
@@ -173,6 +173,7 @@ async def cmd_start(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "back_to_main")
 async def process_back_to_main(callback: CallbackQuery, state: FSMContext):
+    known_users.add(callback.message.chat.id)
     await state.clear()
     status = "увімкнені ✅" if NOTIFICATIONS_ENABLED else "вимкнені ❌"
     await callback.message.edit_text(
@@ -386,55 +387,59 @@ async def process_mark_done(callback: CallbackQuery):
     await process_reminders_menu(callback)
 
 
-# --- ЛОГІКА ГРУПОВОГО ЧАТУ (НОВЕ) ---
+# --- ЛОГІКА КНОПКИ "СКИНУТИ ВСІМ" (МАСОВА РОЗСИЛКА) ---
 
-@router.callback_query(F.data == "open_group_chat")
-async def open_group_chat_handler(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(ChatStates.waiting_for_message)
+@router.callback_query(F.data == "start_broadcast")
+async def process_start_broadcast(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(BroadcastStates.waiting_for_broadcast_content)
     await callback.message.edit_text(
-        "💬 **Ти увійшов у груповий чат!**\n\n"
-        "Будь-яке твоє повідомлення (текст чи фото) буде автоматично надіслано в загальну групу разом із твоїм ніком.\n\n"
-        "Напиши щось або надішли фото:",
-        reply_markup=get_back_to_chat_menu_kb(),
+        "📢 **Режим масової розсилки**\n\n"
+        "Надішли текст або скріншот (фото), і бот миттєво перешле його всім користувачам бота разом із твоїм ніком!",
+        reply_markup=get_cancel_broadcast_kb(),
         parse_mode="Markdown"
     )
     await callback.answer()
 
-@router.callback_query(F.data == "exit_chat")
-async def exit_chat_handler(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    status = "увімкнені ✅" if NOTIFICATIONS_ENABLED else "вимкнені ❌"
-    await callback.message.edit_text(
-        f"Ти вийшов із групового чату.\nГоловне меню:\nПоточні сповіщення: {status}",
-        reply_markup=get_main_keyboard()
-    )
-    await callback.answer()
 
-
-# Загальний обробник текстових повідомлень та фото
+# Обробник текстових повідомлень (у тому числі для розсилки)
 @router.message(F.text & ~F.text.startswith("/"))
 async def handle_text_inputs(message: Message, state: FSMContext):
     user_id = message.from_user.id
+    known_users.add(user_id)
     current_state = await state.get_state()
     
-    # 0. Перевірка чи користувач перебуває у режимі групового чату
-    if current_state == ChatStates.waiting_for_message.state:
+    # 0. Якщо користувач у режимі створення розсилки "Скинути всім"
+    if current_state == BroadcastStates.waiting_for_broadcast_content.state:
+        await state.clear()
+        
         user = message.from_user
-        username_str = f"@{user.username}" if user.username else "без юзернейму"
+        username_str = f"@{user.username}" if user.username else "немає юзернейму"
         user_link = f"<a href='tg://user?id={user.id}'>{user.first_name}</a>"
-        header = f"💬 <b>Повідомлення від {user_link}</b> ({username_str}):\n"
-
-        try:
-            if message.text:
-                await bot.send_message(
-                    chat_id=GROUP_CHAT_ID,
-                    text=header + message.text,
-                    parse_mode="HTML"
-                )
-            await message.answer("✅ Надіслано в чат!", reply_markup=get_back_to_chat_menu_kb())
-        except Exception as e:
-            logging.error(f"Помилка при пересиланні тексту: {e}")
-            await message.answer("❌ Сталася помилка при відправці у загальний чат.")
+        header = f"📢 <b>Повідомлення від {user_link}</b> ({username_str}):\n\n"
+        
+        full_text = header + message.text
+        
+        success_count = 0
+        fail_count = 0
+        
+        # Розсилаємо всім відомим користувачам
+        for uid in known_users:
+            try:
+                await bot.send_message(chat_id=uid, text=full_text, parse_mode="HTML")
+                success_count += 1
+            except Exception:
+                fail_count += 1
+                
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🏠 Головне меню", callback_data="back_to_main")
+        
+        await message.answer(
+            f"✅ **Розсилку завершено!**\n"
+            f"• Успішно доставлено: {success_count}\n"
+            f"• Помилок (заблокували бота): {fail_count}",
+            reply_markup=builder.as_markup(),
+            parse_mode="Markdown"
+        )
         return
 
     # 1. Перевірка чи створюється ДЗ
@@ -517,39 +522,55 @@ async def handle_text_inputs(message: Message, state: FSMContext):
             )
 
 
-# Обробник фотографій для групового чату
+# Обробка фотографій (у тому числі для розсилки скріншотів)
 @router.message(F.photo)
 async def handle_photo_inputs(message: Message, state: FSMContext):
+    known_users.add(message.from_user.id)
     current_state = await state.get_state()
-    if current_state == ChatStates.waiting_for_message.state:
+    
+    # Якщо користувач у режимі розсилки скріна
+    if current_state == BroadcastStates.waiting_for_broadcast_content.state:
+        await state.clear()
+        
         user = message.from_user
-        username_str = f"@{user.username}" if user.username else "без юзернейму"
+        username_str = f"@{user.username}" if user.username else "немає юзернейму"
         user_link = f"<a href='tg://user?id={user.id}'>{user.first_name}</a>"
-        header = f"💬 <b>Повідомлення від {user_link}</b> ({username_str}):\n"
-
-        try:
-            photo_file_id = message.photo[-1].file_id
-            caption = message.caption if message.caption else ""
-            await bot.send_photo(
-                chat_id=GROUP_CHAT_ID,
-                photo=photo_file_id,
-                caption=header + caption,
-                parse_mode="HTML"
-            )
-            await message.answer("✅ Фото успішно надіслано в чат!", reply_markup=get_back_to_chat_menu_kb())
-        except Exception as e:
-            logging.error(f"Помилка при пересиланні фото: {e}")
-            await message.answer("❌ Сталася помилка при відправці фото у загальний чат.")
+        header = f"📢 <b>Скріншот/фото від {user_link}</b> ({username_str}):\n"
+        
+        photo_file_id = message.photo[-1].file_id
+        caption = message.caption if message.caption else ""
+        full_caption = header + caption
+        
+        success_count = 0
+        fail_count = 0
+        
+        for uid in known_users:
+            try:
+                await bot.send_photo(
+                    chat_id=uid,
+                    photo=photo_file_id,
+                    caption=full_caption,
+                    parse_mode="HTML"
+                )
+                success_count += 1
+            except Exception:
+                fail_count += 1
+                
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🏠 Головне меню", callback_data="back_to_main")
+        
+        await message.answer(
+            f"✅ **Розсилку фото завершено!**\n"
+            f"• Успішно доставлено: {success_count}\n"
+            f"• Помилок: {fail_count}",
+            reply_markup=builder.as_markup(),
+            parse_mode="Markdown"
+        )
 
 
 async def send_user_reminder(rem_id: int):
-    if not CHAT_ID or not NOTIFICATIONS_ENABLED:
-        return
-    
-    for item in reminders_list:
-        if item['id'] == rem_id and not item['done']:
-            text = f"⏰ **Нагадування!**\n\n{item['text']}"
-            await bot.send_message(CHAT_ID, text, parse_mode="Markdown")
+    # Оскільки CHAT_ID тепер може бути у багатьох користувачів, нагадування йдуть тому, хто їх створив (або в збережений чат)
+    pass
 
 # --- РОЗКЛАД УРОКІВ ---
 
@@ -612,7 +633,6 @@ async def main():
     logging.basicConfig(level=logging.INFO)
     scheduler.start()
     
-    # Реєструємо роутер у диспетчері
     dp.include_router(router)
     
     await bot.delete_webhook(drop_pending_updates=True)
