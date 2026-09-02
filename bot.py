@@ -13,59 +13,68 @@ TOKEN = "8952184969:AAHS21Naqs1Hmtvpvi7Eh-oNcclRZFCMj9Q"
 # ID твого чату (або групи), куди бот має слати сповіщення
 CHAT_ID = None 
 
+# Змінна для керування статусом сповіщень (увімкнено за замовчуванням)
+NOTIFICATIONS_ENABLED = True
+
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 scheduler = AsyncIOScheduler(timezone="Europe/Kiev")
 
-# Розклад на вівторок (з точним часом дзвінків)
+# Розклад на вівторок (без кабінетів)
 TUESDAY_SCHEDULE = {
-    "1": {"time": "08:30 - 09:15", "name": "Алгебра", "room": "Кабінет основ здоров'я [5]"},
-    "2": {"time": "09:25 - 10:10", "name": "Українська мова", "room": "Кабінет укр. мови [54]"},
-    "3": {"time": "10:25 - 11:10", "name": "Алгебра", "room": "Кабінет основ здоров'я [5]"},
-    "4": {"time": "11:30 - 12:15", "name": "Всесвітня історія", "room": "Архів школи [59]"},
-    "5": {"time": "12:35 - 13:20", "name": "Інформатика", "room": "Кабінет інформатики [33]"},
-    "6": {"time": "13:30 - 14:15", "name": "Технології", "room": "Майстерня по обробці дерева і металу [2]"},
-    "7": {"time": "14:25 - 15:10", "name": "Біологія", "room": "Кабінет біології [7]"},
-    "8": {"time": "15:20 - 16:05", "name": "Мистецтво", "room": "Архів школи [59]"}
+    "1": {"time": "08:30 - 09:15", "name": "Алгебра"},
+    "2": {"time": "09:25 - 10:10", "name": "Українська мова"},
+    "3": {"time": "10:25 - 11:10", "name": "Алгебра"},
+    "4": {"time": "11:30 - 12:15", "name": "Всесвітня історія"},
+    "5": {"time": "12:35 - 13:20", "name": "Інформатика"},
+    "6": {"time": "13:30 - 14:15", "name": "Технології"},
+    "7": {"time": "14:25 - 15:10", "name": "Біологія"},
+    "8": {"time": "15:20 - 16:05", "name": "Мистецтво"}
 }
 
-# Розклад на середу
+# Розклад на середу (без кабінетів)
 WEDNESDAY_SCHEDULE = {
-    "1": {"time": "08:30 - 09:15", "name": "Англійська мова", "room": "Класна кімната 9-А [67]"},
-    "2": {"time": "09:25 - 10:10", "name": "Українська мова", "room": "Кабінет укр. мови [54]"},
-    "3": {"time": "10:25 - 11:10", "name": "Фізика", "room": "Архів школи [59]"},
-    "4": {"time": "11:30 - 12:15", "name": "Вікно / Самостійна", "room": "-"},
-    "5": {"time": "12:35 - 13:20", "name": "Польська мова", "room": "Архів школи [59]"},
-    "6": {"time": "13:30 - 14:15", "name": "Геометрія", "room": "Кабінет основ здоров'я [5]"},
-    "7": {"time": "14:25 - 15:10", "name": "Українська література", "room": "Архів школи [59]"}
+    "1": {"time": "08:30 - 09:15", "name": "Англійська мова"},
+    "2": {"time": "09:25 - 10:10", "name": "Українська мова"},
+    "3": {"time": "10:25 - 11:10", "name": "Фізика"},
+    "4": {"time": "11:30 - 12:15", "name": "Вікно / Самостійна"},
+    "5": {"time": "12:35 - 13:20", "name": "Польська мова"},
+    "6": {"time": "13:30 - 14:15", "name": "Геометрія"},
+    "7": {"time": "14:25 - 15:10", "name": "Українська література"}
 }
 
-# Розклад на четвер
+# Розклад на четвер (без кабінетів)
 THURSDAY_SCHEDULE = {
-    "1": {"time": "08:30 - 09:15", "name": "Інтегрований курс \"Здоров'я, безпека та добробут\"", "room": "Архів школи [59]"},
-    "2": {"time": "09:25 - 10:10", "name": "Вікно / Самостійна", "room": "-"},
-    "3": {"time": "10:25 - 11:10", "name": "Англійська мова", "room": "Класна кімната 9-Б [46]"},
-    "4": {"time": "11:30 - 12:15", "name": "Алгебра", "room": "Кабінет інформатики [33]"},
-    "5": {"time": "12:35 - 13:20", "name": "Історія України", "room": "Архів школи [59]"},
-    "6": {"time": "13:30 - 14:15", "name": "Інформатика", "room": "Кабінет інформатики [33]"},
-    "7": {"time": "14:25 - 15:10", "name": "Геометрія", "room": "Кабінет основ здоров'я [5]"}
+    "1": {"time": "08:30 - 09:15", "name": "Інтегрований курс \"Здоров'я, безпека та добробут\""},
+    "2": {"time": "09:25 - 10:10", "name": "Вікно / Самостійна"},
+    "3": {"time": "10:25 - 11:10", "name": "Англійська мова"},
+    "4": {"time": "11:30 - 12:15", "name": "Алгебра"},
+    "5": {"time": "12:35 - 13:20", "name": "Історія України"},
+    "6": {"time": "13:30 - 14:15", "name": "Інформатика"},
+    "7": {"time": "14:25 - 15:10", "name": "Геометрія"}
 }
 
-# Розклад на п'ятницю
+# Розклад на п'ятницю (без кабінетів)
 FRIDAY_SCHEDULE = {
-    "1": {"time": "08:30 - 09:15", "name": "Хімія", "room": "Хімічний кабінет [47]"},
-    "2": {"time": "09:25 - 10:10", "name": "Українська мова", "room": "Кабінет укр. мови [54]"},
-    "3": {"time": "10:25 - 11:10", "name": "Біологія", "room": "Кабінет біології [7]"},
-    "4": {"time": "11:30 - 12:15", "name": "Польська мова", "room": "Архів школи [59]"},
-    "5": {"time": "12:35 - 13:20", "name": "Вікно / Самостійна", "room": "-"},
-    "6": {"time": "13:30 - 14:15", "name": "Географія", "room": "Архів школи [59]"},
-    "7": {"time": "14:25 - 15:10", "name": "Українська література", "room": "Архів школи [59]"}
+    "1": {"time": "08:30 - 09:15", "name": "Хімія"},
+    "2": {"time": "09:25 - 10:10", "name": "Українська мова"},
+    "3": {"time": "10:25 - 11:10", "name": "Біологія"},
+    "4": {"time": "11:30 - 12:15", "name": "Польська мова"},
+    "5": {"time": "12:35 - 13:20", "name": "Вікно / Самостійна"},
+    "6": {"time": "13:30 - 14:15", "name": "Географія"},
+    "7": {"time": "14:25 - 15:10", "name": "Українська література"}
 }
 
-# Головне меню з кнопкою розкладу
+# Головне меню з новими кнопками
 def get_main_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="📅 Подивитися розклад", callback_data="show_schedule_menu")
+    builder.button(text="📝 Нотатки", callback_data="show_notes")
+    
+    notif_text = "🔕 Вимкнути сповіщення" if NOTIFICATIONS_ENABLED else "🔔 Увімкнути сповіщення"
+    builder.button(text=notif_text, callback_data="toggle_notifications")
+    
+    builder.adjust(1, 2)
     return builder.as_markup()
 
 # Меню вибору днів тижня
@@ -76,17 +85,52 @@ def get_days_keyboard():
     builder.button(text="Середа", callback_data="day_wednesday")
     builder.button(text="Четвер", callback_data="day_thursday")
     builder.button(text="П'ятниця", callback_data="day_friday")
-    builder.adjust(2, 2, 1)
+    builder.button(text="⬅️ Назад у меню", callback_data="back_to_main")
+    builder.adjust(2, 2, 1, 1)
     return builder.as_markup()
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
     global CHAT_ID
     CHAT_ID = message.chat.id
+    status = "увімкнені ✅" if NOTIFICATIONS_ENABLED else "вимкнені ❌"
     await message.answer(
-        "Привіт! Я твій шкільний бот-помічник. Я буду сповіщати тебе про початок та кінець уроків, а також показувати актуальний розклад.",
+        f"Привіт! Я твій шкільний бот-помічник.\nПоточні сповіщення: {status}",
         reply_markup=get_main_keyboard()
     )
+
+@dp.callback_query(F.data == "back_to_main")
+async def process_back_to_main(callback: CallbackQuery):
+    status = "увімкнені ✅" if NOTIFICATIONS_ENABLED else "вимкнені ❌"
+    await callback.message.edit_text(
+        f"Головне меню:\nПоточні сповіщення: {status}",
+        reply_markup=get_main_keyboard()
+    )
+    await callback.answer()
+
+@dp.callback_query(F.data == "toggle_notifications")
+async def process_toggle_notifications(callback: CallbackQuery):
+    global NOTIFICATIONS_ENABLED
+    NOTIFICATIONS_ENABLED = not NOTIFICATIONS_ENABLED
+    status = "увімкнені ✅" if NOTIFICATIONS_ENABLED else "вимкнені ❌"
+    
+    await callback.message.edit_text(
+        f"Головне меню:\nСповіщення тепер {status}",
+        reply_markup=get_main_keyboard()
+    )
+    await callback.answer("Статус сповіщень змінено!")
+
+@dp.callback_query(F.data == "show_notes")
+async def process_notes(callback: CallbackQuery):
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⬅️ Назад у меню", callback_data="back_to_main")
+    
+    await callback.message.edit_text(
+        "📝 **Ваші нотатки:**\n\nТут поки що порожньо. Скоро сюди можна буде додавати домашні завдання чи важливі записи!",
+        reply_markup=builder.as_markup(),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
 
 @dp.callback_query(F.data == "show_schedule_menu")
 async def process_schedule_menu(callback: CallbackQuery):
@@ -99,7 +143,7 @@ async def process_schedule_menu(callback: CallbackQuery):
 async def show_schedule_text(callback: CallbackQuery, schedule_dict: dict, day_name: str):
     text = f"📅 **Розклад на {day_name}:**\n\n"
     for num, lesson in schedule_dict.items():
-        text += f"🔹 **{num}. {lesson['name']}** ({lesson['time']})\n   📍 _{lesson['room']}_\n\n"
+        text += f"🔹 **{num}. {lesson['name']}** ({lesson['time']})\n"
     
     builder = InlineKeyboardBuilder()
     builder.button(text="⬅️ Назад до днів", callback_data="show_schedule_menu")
@@ -136,21 +180,20 @@ async def process_other_days(callback: CallbackQuery):
 
 # Сповіщення про початок конкретного уроку
 async def send_lesson_start_notification(day_schedule: dict, lesson_number: str):
-    if not CHAT_ID:
+    if not CHAT_ID or not NOTIFICATIONS_ENABLED:
         return
     
     lesson = day_schedule.get(lesson_number)
     if lesson and lesson['name'] != "Вікно / Самостійна":
         text = (
             f"🔔 **Урок {lesson_number}: {lesson['name']} почався!**\n\n"
-            f"⏰ Час: {lesson['time']}\n"
-            f"📍 {lesson['room']}"
+            f"⏰ Час: {lesson['time']}"
         )
         await bot.send_message(CHAT_ID, text, parse_mode="Markdown")
 
 # Сповіщення про кінець уроку
 async def send_lesson_end_notification(day_schedule: dict, lesson_number: str):
-    if not CHAT_ID:
+    if not CHAT_ID or not NOTIFICATIONS_ENABLED:
         return
     
     lesson = day_schedule.get(lesson_number)
@@ -160,9 +203,8 @@ async def send_lesson_end_notification(day_schedule: dict, lesson_number: str):
         )
         await bot.send_message(CHAT_ID, text, parse_mode="Markdown")
 
-# Налаштування розкладу подій (початок і кінець для кожного уроку)
+# Налаштування розкладу подій
 def setup_scheduler():
-    # Дзвінки для вівторка (8 уроків)
     tue_schedule_data = [
         ('8', '30', '9', '15', '1'),
         ('9', '25', '10', '10', '2'),
@@ -177,7 +219,6 @@ def setup_scheduler():
         scheduler.add_job(send_lesson_start_notification, 'cron', day_of_week='tue', hour=start_h, minute=start_m, args=[TUESDAY_SCHEDULE, num])
         scheduler.add_job(send_lesson_end_notification, 'cron', day_of_week='tue', hour=end_h, minute=end_m, args=[TUESDAY_SCHEDULE, num])
 
-    # Дзвінки для середи (7 уроків)
     wed_schedule_data = [
         ('8', '30', '9', '15', '1'),
         ('9', '25', '10', '10', '2'),
@@ -191,7 +232,6 @@ def setup_scheduler():
         scheduler.add_job(send_lesson_start_notification, 'cron', day_of_week='wed', hour=start_h, minute=start_m, args=[WEDNESDAY_SCHEDULE, num])
         scheduler.add_job(send_lesson_end_notification, 'cron', day_of_week='wed', hour=end_h, minute=end_m, args=[WEDNESDAY_SCHEDULE, num])
 
-    # Дзвінки для четверга (7 уроків)
     thu_schedule_data = [
         ('8', '30', '9', '15', '1'),
         ('9', '25', '10', '10', '2'),
@@ -205,7 +245,6 @@ def setup_scheduler():
         scheduler.add_job(send_lesson_start_notification, 'cron', day_of_week='thu', hour=start_h, minute=start_m, args=[THURSDAY_SCHEDULE, num])
         scheduler.add_job(send_lesson_end_notification, 'cron', day_of_week='thu', hour=end_h, minute=end_m, args=[THURSDAY_SCHEDULE, num])
 
-    # Дзвінки для п'ятниці (7 уроків)
     fri_schedule_data = [
         ('8', '30', '9', '15', '1'),
         ('9', '25', '10', '10', '2'),
