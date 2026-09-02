@@ -20,6 +20,10 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 scheduler = AsyncIOScheduler(timezone="Europe/Kiev")
 
+# Словники та бази даних в пам'яті
+reminders_list = []      # Список активних та виконаних нагадувань
+user_creation_step = {}  # Тимчасове збереження кроків створення нагадування
+
 # Розклад на вівторок (з учителями)
 TUESDAY_SCHEDULE = {
     "1": {"time": "08:30 - 09:15", "name": "Алгебра", "teacher": "Оксана Миколаївна"},
@@ -32,7 +36,7 @@ TUESDAY_SCHEDULE = {
     "8": {"time": "15:20 - 16:05", "name": "Мистецтво", "teacher": "Ірина Василівна"}
 }
 
-# Розклад на середу (з учителями)
+# Розклад на середу
 WEDNESDAY_SCHEDULE = {
     "1": {"time": "08:30 - 09:15", "name": "Англійська мова", "teacher": "Галина Зиновіївна"},
     "2": {"time": "09:25 - 10:10", "name": "Українська мова", "teacher": "Ольга Степанівна"},
@@ -43,7 +47,7 @@ WEDNESDAY_SCHEDULE = {
     "7": {"time": "14:25 - 15:10", "name": "Українська література", "teacher": "Наталія Вікторівна"}
 }
 
-# Розклад на четвер (з учителями)
+# Розклад на четвер
 THURSDAY_SCHEDULE = {
     "1": {"time": "08:30 - 09:15", "name": "Інтегрований курс \"Здоров'я, безпека та добробут\"", "teacher": "Надія Григорівна"},
     "2": {"time": "09:25 - 10:10", "name": "Вікно / Самостійна", "teacher": "-"},
@@ -54,14 +58,14 @@ THURSDAY_SCHEDULE = {
     "7": {"time": "14:25 - 15:10", "name": "Геометрія", "teacher": "Оксана Миколаївна"}
 }
 
-# Розклад на п'ятницю (з учителями)
+# Розклад на п'ятницю
 FRIDAY_SCHEDULE = {
     "1": {"time": "08:30 - 09:15", "name": "Хімія", "teacher": "Володимир Леонідович"},
     "2": {"time": "09:25 - 10:10", "name": "Українська мова", "teacher": "Ольга Степанівна"},
     "3": {"time": "10:25 - 11:10", "name": "Біологія", "teacher": "Надія Григорівна"},
     "4": {"time": "11:30 - 12:15", "name": "Польська мова", "teacher": "Людмила Петрівна"},
     "5": {"time": "12:35 - 13:20", "name": "Вікно / Самостійна", "teacher": "-"},
-    "6": {"time": "13:30 - 14:15", "name": "Географія", "teacher": "Тетяна Федорівна"},
+    "6": {"time": "13:30 - 14:15", "name": "Географія", "teacher": "Тетяна Федорівna"},
     "7": {"time": "14:25 - 15:10", "name": "Українська література", "teacher": "Наталія Вікторівна"}
 }
 
@@ -69,7 +73,7 @@ FRIDAY_SCHEDULE = {
 def get_main_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="📅 Подивитися розклад", callback_data="show_schedule_menu")
-    builder.button(text="📝 Нотатки", callback_data="show_notes")
+    builder.button(text="⏰ Нагадування", callback_data="show_reminders")
     
     notif_text = "🔕 Вимкнути сповіщення" if NOTIFICATIONS_ENABLED else "🔔 Увімкнути сповіщення"
     builder.button(text=notif_text, callback_data="toggle_notifications")
@@ -77,7 +81,7 @@ def get_main_keyboard():
     builder.adjust(1, 2)
     return builder.as_markup()
 
-# Меню вибору днів тижня
+# Меню вибору днів тижня для розкладу
 def get_days_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="Понеділок", callback_data="day_monday")
@@ -120,17 +124,187 @@ async def process_toggle_notifications(callback: CallbackQuery):
     )
     await callback.answer("Статус сповіщень змінено!")
 
-@dp.callback_query(F.data == "show_notes")
-async def process_notes(callback: CallbackQuery):
+# --- РОЗДІЛ НАГАДУВАНЬ ---
+
+@dp.callback_query(F.data == "show_reminders")
+async def process_reminders_menu(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
+    builder.button(text="➕ Створити нагадування", callback_data="create_reminder")
+    
+    # Виводимо активні нагадування
+    active_text = "📌 **Активні нагадування:**\n"
+    active_items = [r for r in reminders_list if not r['done']]
+    if not active_items:
+        active_text += "_Немає активних нагадувань_\n"
+    else:
+        for idx, item in enumerate(active_items):
+            active_text += f"• {item['text']} (📅 {item['day_name']} о {item['time']})\n"
+            builder.button(text=f"✅ Виконати: {item['text'][:15]}...", callback_data=f"done_rem_{item['id']}")
+
+    # Виводимо список зробленого
+    done_text = "\n📋 **Виконані нагадування:**\n"
+    done_items = [r for r in reminders_list if r['done']]
+    if not done_items:
+        done_text += "_Поки що нічого не виконано_\n"
+    else:
+        for item in done_items:
+            done_text += f"✔️ ~~{item['text']}~~\n"
+
     builder.button(text="⬅️ Назад у меню", callback_data="back_to_main")
+    builder.adjust(1)
     
     await callback.message.edit_text(
-        "📝 **Ваші нотатки:**\n\nТут поки що порожньо. Скоро сюди можна буде додавати домашні завдання чи важливі записи!",
+        active_text + done_text,
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
     await callback.answer()
+
+@dp.callback_query(F.data == "create_reminder")
+async def process_create_reminder(callback: CallbackQuery):
+    user_creation_step[callback.from_user.id] = {"step": "waiting_text"}
+    builder = InlineKeyboardBuilder()
+    builder.button(text="❌ Скасувати", callback_data="show_reminders")
+    
+    await callback.message.edit_text(
+        "✍️ **Напишіть, що ви хочете нагадати:**",
+        reply_markup=builder.as_markup(),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+# Вибір дня тижня для нагадування
+def get_reminder_days_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Понеділок", callback_data="rem_day_mon")
+    builder.button(text="Вівторок", callback_data="rem_day_tue")
+    builder.button(text="Середа", callback_data="rem_day_wed")
+    builder.button(text="Четвер", callback_data="rem_day_thu")
+    builder.button(text="П'ятниця", callback_data="rem_day_fri")
+    builder.button(text="Субота", callback_data="rem_day_sat")
+    builder.button(text="Неділя", callback_data="rem_day_sun")
+    builder.button(text="❌ Скасувати", callback_data="show_reminders")
+    builder.adjust(2, 2, 2, 1, 1)
+    return builder.as_markup()
+
+@dp.callback_query(F.data.startswith("rem_day_"))
+async def process_reminder_day_chosen(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    if user_id not in user_creation_step:
+        await callback.message.edit_text("Помилка. Спробуйте знову.", reply_markup=get_main_keyboard())
+        return
+    
+    day_code = callback.data.split("_")[2]
+    days_map = {
+        "mon": ("Понеділок", "mon"),
+        "tue": ("Вівторок", "tue"),
+        "wed": ("Середа", "wed"),
+        "thu": ("Четвер", "thu"),
+        "fri": ("П'ятниця", "fri"),
+        "sat": ("Субота", "sat"),
+        "sun": ("Неділя", "sun")
+    }
+    
+    user_creation_step[user_id]["day_name"] = days_map[day_code][0]
+    user_creation_step[user_id]["day_cron"] = days_map[day_code][1]
+    user_creation_step[user_id]["step"] = "waiting_time"
+    
+    builder = InlineKeyboardBuilder()
+    builder.button(text="❌ Скасувати", callback_data="show_reminders")
+
+    await callback.message.edit_text(
+        f"📅 День обрано: **{days_map[day_code][0]}**\n\n⏰ **Тепер напишіть годину у форматі Година:Хвилина (наприклад: 14:30 або 08:15):**",
+        reply_markup=builder.as_markup(),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("done_rem_"))
+async def process_mark_done(callback: CallbackQuery):
+    rem_id = int(callback.data.split("_")[2])
+    for item in reminders_list:
+        if item['id'] == rem_id:
+            item['done'] = True
+    await process_reminders_menu(callback)
+
+# Текстові обробники для створення нагадувань (що і коли)
+@dp.message(F.text & ~F.text.startswith("/"))
+async def handle_text_inputs(message: Message):
+    user_id = message.from_user.id
+    if user_id not in user_creation_step:
+        return # Якщо користувач пише щось інше не у процесі створення нагадування
+    
+    state = user_creation_step[user_id]
+    
+    if state["step"] == "waiting_text":
+        state["text"] = message.text
+        state["step"] = "waiting_day"
+        
+        builder = InlineKeyboardBuilder()
+        builder.button(text="❌ Скасувати", callback_data="show_reminders")
+        
+        await message.answer(
+            "📌 **Коли нагадати?**\nОберіть день тижня:",
+            reply_markup=get_reminder_days_keyboard(),
+            parse_mode="Markdown"
+        )
+        
+    elif state["step"] == "waiting_time":
+        time_text = message.text.strip()
+        try:
+            hour_str, minute_str = time_text.split(":")
+            hour = int(hour_str)
+            minute = int(minute_str)
+            if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                raise ValueError()
+        except:
+            await message.answer("❌ Неправильний формат часу. Введіть у форматі Година:Хвилина, наприклад `14:30`:", parse_mode="Markdown")
+            return
+        
+        # Зберігаємо нагадування
+        rem_id = len(reminders_list) + 1
+        new_reminder = {
+            "id": rem_id,
+            "text": state["text"],
+            "day_name": state["day_name"],
+            "time": time_text,
+            "done": False
+        }
+        reminders_list.append(new_reminder)
+        
+        # Додаємо задачу в планувальник (apscheduler)
+        scheduler.add_job(
+            send_user_reminder,
+            'cron',
+            day_of_week=state["day_cron"],
+            hour=hour,
+            minute=minute,
+            args=[rem_id]
+        )
+        
+        del user_creation_step[user_id]
+        
+        builder = InlineKeyboardBuilder()
+        builder.button(text="⏰ До нагадувань", callback_data="show_reminders")
+        builder.button(text="🏠 Головне меню", callback_data="back_to_main")
+        builder.adjust(1)
+        
+        await message.answer(
+            f"✅ **Нагадування успішно створено!**\n\n📌 Що: {new_reminder['text']}\n📅 Коли: {new_reminder['day_name']} о {time_text}",
+            reply_markup=builder,
+            parse_mode="Markdown"
+        )
+
+async def send_user_reminder(rem_id: int):
+    if not CHAT_ID or not NOTIFICATIONS_ENABLED:
+        return
+    
+    for item in reminders_list:
+        if item['id'] == rem_id and not item['done']:
+            text = f"⏰ **Нагадування!**\n\n{item['text']}"
+            await bot.send_message(CHAT_ID, text, parse_mode="Markdown")
+
+# --- РОЗКЛАД УРОКІВ ---
 
 @dp.callback_query(F.data == "show_schedule_menu")
 async def process_schedule_menu(callback: CallbackQuery):
@@ -181,7 +355,7 @@ async def process_other_days(callback: CallbackQuery):
     )
     await callback.answer()
 
-# Сповіщення про початок конкретного уроку
+# Сповіщення про початок уроку
 async def send_lesson_start_notification(day_schedule: dict, lesson_number: str):
     if not CHAT_ID or not NOTIFICATIONS_ENABLED:
         return
@@ -207,7 +381,7 @@ async def send_lesson_end_notification(day_schedule: dict, lesson_number: str):
         )
         await bot.send_message(CHAT_ID, text, parse_mode="Markdown")
 
-# Налаштування розкладу подій
+# Налаштування розкладу уроків у планувальнику
 def setup_scheduler():
     tue_schedule_data = [
         ('8', '30', '9', '15', '1'),
