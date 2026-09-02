@@ -29,9 +29,43 @@ def get_current_week():
     week_number = datetime.now().isocalendar()[1]
     return 1 if week_number % 2 != 0 else 2
 
-# НОВИЙ РОЗКЛАД УРОКІВ (Формат: [Урок 1 тижня, Урок 2 тижня])
-# Якщо предмет один, обидва значення однакові.
+# Функція для автоматичного додавання емодзі до предметів
+def get_subject_with_emoji(name: str) -> str:
+    lower_name = name.lower()
+    if "англі" in lower_name:
+        return f"🇬🇧 {name}"
+    elif "хім" in lower_name:
+        return f"🧪 {name}"
+    elif "укр. мов" in lower_name or "укр мов" in lower_name:
+        return f"🇺🇦 {name}"
+    elif "укр. літ" in lower_name or "укр літ" in lower_name:
+        return f"📖 {name}"
+    elif "ф-ра" in lower_name or "фіз" in lower_name and "культ" in lower_name:
+        return f"⚽ {name}"
+    elif "фізик" in lower_name:
+        return f"⚛️ {name}"
+    elif "зарубіж" in lower_name:
+        return f"📚 {name}"
+    elif "матем" in lower_name or "алгебр" in lower_name or "геометр" in lower_name:
+        return f"📐 {name}"
+    elif "історі" in lower_name:
+        return f"🏛️ {name}"
+    elif "інфор" in lower_name:
+        return f"💻 {name}"
+    elif "технолог" in lower_name or "збд" in lower_name or "прг" in lower_name:
+        return f"🛠️ {name}"
+    elif "біолог" in lower_name:
+        return f"🧬 {name}"
+    elif "мист" in lower_name:
+        return f"🎨 {name}"
+    elif "польськ" in lower_name:
+        return f"🇵🇱 {name}"
+    elif "географ" in lower_name:
+        return f"🌍 {name}"
+    else:
+        return f"📖 {name}"
 
+# РОЗКЛАД УРОКІВ (Формат: [Урок 1 тижня, Урок 2 тижня])
 MONDAY_SCHEDULE = {
     "1": {"time": "08:30 - 09:15", "name": ["Англ. мова", "Англ. мова"]},
     "2": {"time": "09:25 - 10:10", "name": ["Хімія", "Хімія"]},
@@ -324,9 +358,9 @@ async def show_schedule_text(callback: CallbackQuery, schedule_dict: dict, day_n
     text = f"📅 **Розклад на {day_name}** (Зараз іде **{current_week}-й тиждень**):\n\n"
     
     for num, lesson in schedule_dict.items():
-        # Вибираємо предмет залежно від тижня (індекс 0 для 1-го тижня, індекс 1 для 2-го)
-        lesson_name = lesson['name'][0] if current_week == 1 else lesson['name'][1]
-        text += f"🔹 **{num}. {lesson_name}** ({lesson['time']})\n\n"
+        raw_name = lesson['name'][0] if current_week == 1 else lesson['name'][1]
+        formatted_name = get_subject_with_emoji(raw_name)
+        text += f"▫️ **{num}. {formatted_name}** ({lesson['time']})\n\n"
     
     builder = InlineKeyboardBuilder()
     builder.button(text="⬅️ Назад до днів", callback_data="show_schedule_menu")
