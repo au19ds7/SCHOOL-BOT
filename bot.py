@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
@@ -103,7 +103,7 @@ def get_subject_with_emoji(name: str) -> str:
     else:
         return f"📖 {name}"
 
-# --- ВИПРАВЛЕНА ЛОГІКА (щоб зараз видавало 3-тю парту замість 14-ї) ---
+# --- НОВА ЛОГІКА ЧЕРГУВАНЬ ПАРТ (Цикл 1-15, сьогодні = 3) ---
 def get_duty_desk_info(target_date=None):
     if target_date is None:
         target_date = datetime.now()
@@ -113,16 +113,30 @@ def get_duty_desk_info(target_date=None):
     if weekday >= 5:
         return "Вихідний день (субота або неділя). Чергових немає! 🎉"
     
-    start_of_year = datetime(target_date.year, 1, 1)
-    total_school_days = 0
-    curr = start_of_year
-    while curr <= target_date:
-        if curr.weekday() < 5:
-            total_school_days += 1
-        curr = datetime.fromordinal(curr.toordinal() + 1)
-        
-    # Змінюємо зсув, щоб сьогодні випало рівно на 3
-    desk_number = ((total_school_days - 1 + 3 - 14) % 15) + 1
+    # Базова опорна дата: сьогодні (П'ятниця, 4 вересня 2026 р.) має парту №3
+    anchor_date = datetime(2026, 9, 4)
+    anchor_desk = 3
+    
+    # Рахуємо кількість навчальних днів (Пн-Пт) між опорною датою та цільовою
+    curr = anchor_date.date()
+    target = target_date.date()
+    
+    school_days_diff = 0
+    if target > curr:
+        d = curr + timedelta(days=1)
+        while d <= target:
+            if d.weekday() < 5:
+                school_days_diff += 1
+            d += timedelta(days=1)
+    elif target < curr:
+        d = curr
+        while d > target:
+            if d.weekday() < 5:
+                school_days_diff -= 1
+            d -= timedelta(days=1)
+            
+    # Вираховуємо номер парти в межах від 1 до 15 з урахуванням циклу
+    desk_number = ((anchor_desk - 1 + school_days_diff) % 15) + 1
     
     day_names = ["Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця"]
     return f"🏫 Сьогодні **{day_names[weekday]}**.\n🧹 Чергова парта на сьогодні: **{desk_number} парта**."
