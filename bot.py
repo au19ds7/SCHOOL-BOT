@@ -103,14 +103,8 @@ def get_subject_with_emoji(name: str) -> str:
     else:
         return f"📖 {name}"
 
-# --- ЛОГІКА РОЗРАХУНКУ ЧЕРГОВОЇ ПАРТИ ---
+# --- ЛОГІКА РОЗРАХУНКУ ЧЕРГОВОЇ ПАРТИ (3 -> 15 -> 1 -> 2 -> 3) ---
 def get_duty_desk_info(target_date=None):
-    """
-    Рахує чергову парту. 
-    Базова умова: у понеділок (робочий день 0) чергує 3 парта.
-    Далі кожен робочий день (Пн-Пт) додається +1 парта до 15, після чого цикл іде знову з 3.
-    Вихідні (Сб, НД) не враховуються у зміні черги.
-    """
     if target_date is None:
         target_date = datetime.now()
     
@@ -119,14 +113,8 @@ def get_duty_desk_info(target_date=None):
     if weekday >= 5:
         return "Вихідний день (субота або неділя). Чергових немає! 🎉"
     
-    # Вираховуємо загальну кількість навчальних днів, що минули від певної точки, 
-    # або прив'язуємось до номера тижня року + поточний день тижня для стабільного циклу.
-    # Оскільки цикл складається з парт від 3 до 15 (включно це 13 парт: 3,4,5,6,7,8,9,10,11,12,13,14,15),
-    # порахуємо загальну кількість навчальних днів (Пн-Пт) від початку року (або фіксованої дати).
-    
+    # Рахуємо загальну кількість робочих днів (Пн-Пт) від початку року
     start_of_year = datetime(target_date.year, 1, 1)
-    
-    # Рахуємо скільки повних тижнів і днів пройшло
     total_school_days = 0
     curr = start_of_year
     while curr <= target_date:
@@ -134,14 +122,11 @@ def get_duty_desk_info(target_date=None):
             total_school_days += 1
         curr = datetime.fromordinal(curr.toordinal() + 1)
         
-    # Базова парта за умовою: у понеділок (якщо це перший день розрахунку) була 3 парта.
-    # Зробимо так, щоб формула давала правильний зсув:
-    # Початок відліку: 3 парта. 
-    # Формула циклу від 3 до 15 (13 варіантів):
-    desk_number = 3 + ((total_school_days - 1) % 13)
+    # Повний цикл із 15 парт: після 15 йде 1, потім 2, і знову 3
+    desk_number = ((total_school_days - 1 + 2) % 15) + 1
     
     day_names = ["Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця"]
-    return f"🏫 Сьогодні **{day_names[weekday]}**.\n🧹 Чергова парта на сьогодні: **{desk_number} парта** (діапазон парт: від 3 до 15)."
+    return f"🏫 Сьогодні **{day_names[weekday]}**.\n🧹 Чергова парта на сьогодні: **{desk_number} парта**."
 
 # РОЗКЛАД УРОКІВ
 MONDAY_SCHEDULE = {
@@ -685,7 +670,7 @@ async def handle_text_inputs(message: Message, state: FSMContext):
     if current_state == BroadcastStates.waiting_for_anonymous_message.state:
         await state.clear()
         
-        anonymous_text = f"🤫 **Нове анонімне повідомлення (скарга/питання):**\n\n{message.text}"
+        anonymous_text = f"🤫 **Нове анонімде повідомлення (скарга/питання):**\n\n{message.text}"
         
         for uid in known_users:
             try:
