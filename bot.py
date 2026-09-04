@@ -8,13 +8,9 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from google import genai
-from PIL import Image
-import io
 
-# Токени та ключі
+# Токен бота
 TOKEN = "8952184969:AAHS21Naqs1Hmtvpvi7Eh-oNcclRZFCMj9Q"
-GEMINI_API_KEY = "AQ.Ab8RN6K1T7Oob-DdHDVRXvRJREBpQlaYCzESys5T4H9EqkuHTw"
 
 # Твій юзернейм для надсилання анонімних запитань адміну
 ADMIN_USERNAME = "fyto3"
@@ -26,9 +22,6 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 router = Router()
 scheduler = AsyncIOScheduler(timezone="Europe/Kiev")
-
-# Клієнт Google GenAI для розв'язання задач
-ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # Словники та бази даних в пам'яті
 reminders_list = []      # Список нагадувань
@@ -49,7 +42,6 @@ class BroadcastStates(StatesGroup):
     waiting_for_anonymous_message = State()
     waiting_for_anon_target = State()     # Очікування юзернейму одержувача анонімки
     waiting_for_anon_text = State()       # Очікування тексту анонімного повідомлення
-    waiting_for_solver_photo = State()    # Очікування фото з задачею для ШІ
 
 class RatingStates(StatesGroup):
     waiting_for_username = State()
@@ -353,7 +345,6 @@ def get_main_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="🔍 Що зараз?", callback_data="what_is_now")
     builder.button(text="🧹 Хто черговий?", callback_data="who_is_duty")
-    builder.button(text="🧠 Розв'язати задачу (ШІ)", callback_data="start_ai_solver")
     builder.button(text="📅 Подивитися розклад", callback_data="show_schedule_menu")
     builder.button(text="📚 Домашнє завдання", callback_data="show_homework")
     builder.button(text="📘 ГДЗ та Посилання (НЗ)", callback_data="show_gdz_menu")
@@ -366,7 +357,7 @@ def get_main_keyboard():
     notif_text = "🔕 Вимкнути сповіщення" if NOTIFICATIONS_ENABLED else "🔔 Увімкнути сповіщення"
     builder.button(text=notif_text, callback_data="toggle_notifications")
     
-    builder.adjust(1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1)
+    builder.adjust(1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1)
     return builder.as_markup()
 
 def get_cancel_broadcast_kb():
@@ -623,21 +614,6 @@ async def process_rate_value(callback: CallbackQuery):
         text += f"{medal} **{uname}** — `{score_str}` балів\n"
         
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
-
-# --- РОЗВ'ЯЗАТИ ЗАДАЧУ ПО ФОТО (ШІ) ---
-@router.callback_query(F.data == "start_ai_solver")
-async def process_start_ai_solver(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(BroadcastStates.waiting_for_solver_photo)
-    builder = InlineKeyboardBuilder()
-    builder.button(text="❌ Скасувати", callback_data="back_to_main")
-    
-    await callback.message.edit_text(
-        "🧠 **Розв'язання задач та прикладів за допомогою ШІ**\n\n"
-        "📸 Надішли мені фото з прикладом, рівнянням чи задачею, і я розпишу покрокове розв'язання українською мовою!",
-        reply_markup=builder.as_markup(),
-        parse_mode="Markdown"
-    )
-    await callback.answer()
 
 # --- АНОНІМНЕ ЗАПИТАННЯ АДМІНІСТРАТОРУ ---
 @router.callback_query(F.data == "start_anonymous")
@@ -1089,41 +1065,7 @@ async def handle_photo_inputs(message: Message, state: FSMContext):
     
     current_state = await state.get_state()
     
-    # 1. Обробка фото для ШІ-розв'язателя задач
-    if current_state == BroadcastStates.waiting_for_solver_photo.state:
-        processing_msg = await message.answer("⏳ **Аналізую зображення та шукаю розв'язання...** 🧠")
-        try:
-            photo = message.photo[-1]
-            file_info = await bot.get_file(photo.file_id)
-            downloaded_file = await bot.download_file(file_info.file_path)
-            
-            image = Image.open(downloaded_file)
-            
-            response = ai_client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=[
-                    image,
-                    "Розв'яжи цю задачу або приклад з фото крок за кроком. Напиши детальне, зрозуміле пояснення українською мовою."
-                ]
-            )
-            
-            builder = InlineKeyboardBuilder()
-            builder.button(text="📸 Розв'язати ще", callback_data="start_ai_solver")
-            builder.button(text="🏠 Головне меню", callback_data="back_to_main")
-            builder.adjust(1)
-            
-            await message.answer(f"💡 **Розв'язання від ШІ:**\n\n{response.text}", reply_markup=builder.as_markup(), parse_mode="Markdown")
-        except Exception as e:
-            await message.answer(f"❌ Сталася помилка при розв'язанні: {e}")
-        finally:
-            await state.clear()
-            try:
-                await bot.delete_message(chat_id=message.chat.id, message_id=processing_msg.message_id)
-            except:
-                pass
-        return
-
-    # 2. Обробка анонімного фото для адміністратора
+    # 1. Обробка анонімного фото для адміністратора
     if current_state == BroadcastStates.waiting_for_anonymous_message.state:
         await state.clear()
         photo_file_id = message.photo[-1].file_id
@@ -1142,7 +1084,7 @@ async def handle_photo_inputs(message: Message, state: FSMContext):
         await message.answer("✅ **Твоє анонімне фото успішно надіслано адміністратору!**", reply_markup=builder.as_markup(), parse_mode="Markdown")
         return
 
-    # 3. Обробка фото для масової розсилки
+    # 2. Обробка фото для масової розсилки
     if current_state == BroadcastStates.waiting_for_broadcast_content.state:
         await state.clear()
         user_link = f"<a href='tg://user?id={user.id}'>{user.first_name}</a>"
