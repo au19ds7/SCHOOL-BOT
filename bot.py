@@ -33,7 +33,7 @@ known_users = set()
 class BroadcastStates(StatesGroup):
     waiting_for_broadcast_content = State()
 
-# Словник вчителів за предметами (на основі твого фото)
+# Словник вчителів за предметами
 TEACHERS = {
     "Англ. мова": "Галина Зиновіївна / Людмила Петрівна",
     "Хімія": "Володимир Леонідович",
@@ -54,19 +54,16 @@ TEACHERS = {
     "ЗБД - ПРГ": "Оксана Миколаївна / Іванна Петрівна"
 }
 
-# Функція для отримання вчителя за назвою предмету
 def get_teacher_for_subject(subject_name: str) -> str:
     for key, teacher in TEACHERS.items():
         if key.lower() in subject_name.lower():
             return teacher
     return "Не вказано"
 
-# Функція для визначення поточного тижня (1 або 2)
 def get_current_week():
     week_number = datetime.now().isocalendar()[1]
     return 1 if week_number % 2 != 0 else 2
 
-# Автоматичне додавання емодзі до предметів
 def get_subject_with_emoji(name: str) -> str:
     lower_name = name.lower()
     if "англі" in lower_name:
@@ -154,6 +151,74 @@ FRIDAY_SCHEDULE = {
     "7": {"time": "14:25 - 15:10", "name": "Укр. літ."}
 }
 
+WEEK_SCHEDULES = {
+    0: MONDAY_SCHEDULE,
+    1: TUESDAY_SCHEDULE,
+    2: WEDNESDAY_SCHEDULE,
+    3: THURSDAY_SCHEDULE,
+    4: FRIDAY_SCHEDULE
+}
+
+# Функція автоматичної розсилки сповіщень про урок
+async def send_automatic_lesson_notification(day_index: int, lesson_num: str):
+    if not NOTIFICATIONS_ENABLED:
+        return
+    
+    schedule = WEEK_SCHEDULES.get(day_index)
+    if not schedule or lesson_num not in schedule:
+        return
+        
+    lesson = schedule[lesson_num]
+    raw_name = lesson['name']
+    lesson_time = lesson['time']
+    current_week = get_current_week()
+    
+    day_names_ua = ["понеділок", "вівторок", "середу", "четвер", "п'ятницю"]
+    day_str = day_names_ua[day_index]
+    
+    text = f"🔔 **Увага! Завдано початок уроку ({lesson_time}) на {day_str}!**\n\n"
+    
+    if " - " in raw_name:
+        parts = raw_name.split(" - ")
+        part1 = parts[0].strip()
+        part2 = parts[1].strip()
+        teacher1 = get_teacher_for_subject(part1)
+        teacher2 = get_teacher_for_subject(part2)
+        
+        if current_week == 1:
+            formatted_name = f"1️⃣ **{get_subject_with_emoji(part1)}** (👩‍🏫 _{teacher1}_)\n   2️⃣ {get_subject_with_emoji(part2)} (👩‍🏫 _{teacher2}_)"
+        else:
+            formatted_name = f"1️⃣ {get_subject_with_emoji(part1)} (👩‍🏫 _{teacher1}_)\n   2️⃣ **{get_subject_with_emoji(part2)}** (👩‍🏫 _{teacher2}_)"
+        text += f"▫️ **Урок {lesson_num}**:\n{formatted_name}"
+    else:
+        formatted_name = get_subject_with_emoji(raw_name)
+        teacher = get_teacher_for_subject(raw_name)
+        text += f"▫️ **Урок {lesson_num}.** {formatted_name}\n   👩‍🏫 Вчитель: _{teacher}_"
+
+    # Розсилаємо всім користувачам, які коли-небудь запускали бота
+    for uid in known_users:
+        try:
+            await bot.send_message(chat_id=uid, text=text, parse_mode="Markdown")
+        except Exception:
+            pass
+
+def setup_lesson_notifications():
+    # Налаштовуємо розклад автоматично для кожного дня (0 = Понеділок, 4 = П'ятниця)
+    for day_idx, sch in WEEK_SCHEDULES.items():
+        for l_num, data in sch.items():
+            start_time_str = data['time'].split(" - ")[0].strip() # Наприклад "08:30"
+            hour, minute = map(int, start_time_str.split(":"))
+            
+            # Додаємо задачу в планувальник (тільки дні Пн-Пт: 'mon-fri')
+            scheduler.add_job(
+                send_automatic_lesson_notification,
+                'cron',
+                day_of_week=str(day_idx), # 0-4 відповідають Пн-Пт
+                hour=hour,
+                minute=minute,
+                args=[day_idx, l_num]
+            )
+
 # Головне меню
 def get_main_keyboard():
     builder = InlineKeyboardBuilder()
@@ -169,13 +234,11 @@ def get_main_keyboard():
     builder.adjust(1, 2, 1, 1, 1, 1)
     return builder.as_markup()
 
-# Кнопка скасування під час введення розсилання
 def get_cancel_broadcast_kb():
     builder = InlineKeyboardBuilder()
     builder.button(text="❌ Скасувати", callback_data="back_to_main")
     return builder.as_markup()
 
-# Меню вибору днів тижня для розкладу
 def get_days_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="Понеділок", callback_data="day_monday")
@@ -427,14 +490,12 @@ async def process_start_broadcast(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-# Обробник текстових повідомлень
 @router.message(F.text & ~F.text.startswith("/"))
 async def handle_text_inputs(message: Message, state: FSMContext):
     user_id = message.from_user.id
     known_users.add(user_id)
     current_state = await state.get_state()
     
-    # 0. Якщо користувач у режимі створення розсилки "Скинути всім"
     if current_state == BroadcastStates.waiting_for_broadcast_content.state:
         await state.clear()
         
@@ -467,7 +528,6 @@ async def handle_text_inputs(message: Message, state: FSMContext):
         )
         return
 
-    # 1. Перевірка чи створюється ДЗ (виправлено виклик .get)
     if user_id in hw_creation_step and hw_creation_step[user_id].get("step") == "waiting_text":
         day = hw_creation_step[user_id]["day"]
         hw_text = message.text
@@ -488,7 +548,6 @@ async def handle_text_inputs(message: Message, state: FSMContext):
         )
         return
 
-    # 2. Перевірка чи створюється нагадування
     if user_id in user_creation_step:
         st = user_creation_step[user_id]
         
@@ -547,7 +606,6 @@ async def handle_text_inputs(message: Message, state: FSMContext):
             )
 
 
-# Обробка фотографій
 @router.message(F.photo)
 async def handle_photo_inputs(message: Message, state: FSMContext):
     known_users.add(message.from_user.id)
@@ -661,6 +719,10 @@ async def process_friday(callback: CallbackQuery):
 
 async def main():
     logging.basicConfig(level=logging.INFO)
+    
+    # Автоматично налаштовуємо розсилку сповіщень по годинах уроків на Пн-Пт
+    setup_lesson_notifications()
+    
     scheduler.start()
     
     dp.include_router(router)
