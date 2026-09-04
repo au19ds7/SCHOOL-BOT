@@ -33,6 +33,34 @@ known_users = set()
 class BroadcastStates(StatesGroup):
     waiting_for_broadcast_content = State()
 
+# Словник вчителів за предметами (на основі твого фото)
+TEACHERS = {
+    "Англ. мова": "Іноземна мова (перша) — Галина Зиновіївна / Людмила Петрівна", # або за контекстом
+    "Хімія": "Володимир Леонідович",
+    "Укр. мова": "Ольга Степанівна",
+    "Укр. літ.": "Наталія Вікторівна",
+    "Ф-ра": "Михайло Леонідович",
+    "Фізика": "Ірина Володимирівна",
+    "Зарубіжна": "Ірина Василівна",
+    "Матем. а.": "Оксана Миколаївна",
+    "Матем. геом.": "Оксана Миколаївна",
+    "Матем. ат.": "Оксана Миколаївна",
+    "Історія": "Іванна Богданівна",
+    "Інфор.": "Оксана Миколаївна",
+    "Технології": "Іванна Петрівна",
+    "Біологія": "Надія Григорівна",
+    "Мист.": "Ірина Василівна",
+    "Географія": "Тетяна Теодорівна",
+    "ЗБД - ПРГ": "Оксана Миколаївна / Іванна Петрівна"
+}
+
+# Функція для отримання вчителя за назвою предмету
+def get_teacher_for_subject(subject_name: str) -> str:
+    for key, teacher in TEACHERS.items():
+        if key.lower() in subject_name.lower():
+            return teacher
+    return "Не вказано"
+
 # Функція для визначення поточного тижня (1 або 2)
 def get_current_week():
     week_number = datetime.now().isocalendar()[1]
@@ -74,64 +102,56 @@ def get_subject_with_emoji(name: str) -> str:
     else:
         return f"📖 {name}"
 
-# РОЗКЛАД УРОКІВ (час початку та кінця розписано окремо для авто-сповіщень)
+# РОЗКЛАД УРОКІВ
 MONDAY_SCHEDULE = {
-    "1": {"start": "08:30", "end": "09:15", "name": "Англ. мова"},
-    "2": {"start": "09:25", "end": "10:10", "name": "Хімія"},
-    "3": {"start": "10:25", "end": "11:10", "name": "Укр. мова"},
-    "4": {"start": "11:30", "end": "12:15", "name": "Ф-ра"},
-    "5": {"start": "12:35", "end": "13:20", "name": "Фізика"},
-    "6": {"start": "13:30", "end": "14:15", "name": "Зарубіжна"},
-    "7": {"start": "14:25", "end": "15:10", "name": "Фізика 2х"}
+    "1": {"time": "08:30 - 09:15", "name": "Англ. мова"},
+    "2": {"time": "09:25 - 10:10", "name": "Хімія"},
+    "3": {"time": "10:25 - 11:10", "name": "Укр. мова"},
+    "4": {"time": "11:30 - 12:15", "name": "Ф-ра"},
+    "5": {"time": "12:35 - 13:20", "name": "Фізика"},
+    "6": {"time": "13:30 - 14:15", "name": "Зарубіжна"},
+    "7": {"time": "14:25 - 15:10", "name": "Фізика 2х"}
 }
 
 TUESDAY_SCHEDULE = {
-    "1": {"start": "08:30", "end": "09:15", "name": "Англ. - Матем. ат."},
-    "2": {"start": "09:25", "end": "10:10", "name": "Укр. мова"},
-    "3": {"start": "10:25", "end": "11:10", "name": "Матем. а."},
-    "4": {"start": "11:30", "end": "12:15", "name": "Історія"},
-    "5": {"start": "12:35", "end": "13:20", "name": "Інфор."},
-    "6": {"start": "13:30", "end": "14:15", "name": "Технології"},
-    "7": {"start": "14:25", "end": "15:10", "name": "Біологія"},
-    "8": {"start": "15:20", "end": "16:05", "name": "Мист."}
+    "1": {"time": "08:30 - 09:15", "name": "Англ. - Матем. ат."},
+    "2": {"time": "09:25 - 10:10", "name": "Укр. мова"},
+    "3": {"time": "10:25 - 11:10", "name": "Матем. а."},
+    "4": {"time": "11:30 - 12:15", "name": "Історія"},
+    "5": {"time": "12:35 - 13:20", "name": "Інфор."},
+    "6": {"time": "13:30 - 14:15", "name": "Технології"},
+    "7": {"time": "14:25 - 15:10", "name": "Біологія"},
+    "8": {"time": "15:20 - 16:05", "name": "Мист."}
 }
 
 WEDNESDAY_SCHEDULE = {
-    "1": {"start": "08:30", "end": "09:15", "name": "Англ. мова"},
-    "2": {"start": "09:25", "end": "10:10", "name": "Укр. мова - Польська"},
-    "3": {"start": "10:25", "end": "11:10", "name": "Фізика"},
-    "4": {"start": "11:30", "end": "12:15", "name": "Ф-ра"},
-    "5": {"start": "12:35", "end": "13:20", "name": "Укр. мова - Польська"},
-    "6": {"start": "13:30", "end": "14:15", "name": "Матем. геом."},
-    "7": {"start": "14:25", "end": "15:10", "name": "Укр. літ."}
+    "1": {"time": "08:30 - 09:15", "name": "Англ. мова"},
+    "2": {"time": "09:25 - 10:10", "name": "Укр. мова - Польська"},
+    "3": {"time": "10:25 - 11:10", "name": "Фізика"},
+    "4": {"time": "11:30 - 12:15", "name": "Ф-ра"},
+    "5": {"time": "12:35 - 13:20", "name": "Укр. мова - Польська"},
+    "6": {"time": "13:30 - 14:15", "name": "Матем. геом."},
+    "7": {"time": "14:25 - 15:10", "name": "Укр. літ."}
 }
 
 THURSDAY_SCHEDULE = {
-    "1": {"start": "08:30", "end": "09:15", "name": "ЗБД - ПРГ"},
-    "2": {"start": "09:25", "end": "10:10", "name": "Ф-ра"},
-    "3": {"start": "10:25", "end": "11:10", "name": "Англ. мова"},
-    "4": {"start": "11:30", "end": "12:15", "name": "Математика а."},
-    "5": {"start": "12:35", "end": "13:20", "name": "Історія"},
-    "6": {"start": "13:30", "end": "14:15", "name": "Інфор. - Історія"},
-    "7": {"start": "14:25", "end": "15:10", "name": "Матем. ат."}
+    "1": {"time": "08:30 - 09:15", "name": "ЗБД - ПРГ"},
+    "2": {"time": "09:25 - 10:10", "name": "Ф-ра"},
+    "3": {"time": "10:25 - 11:10", "name": "Англ. мова"},
+    "4": {"time": "11:30 - 12:15", "name": "Математика а."},
+    "5": {"time": "12:35 - 13:20", "name": "Історія"},
+    "6": {"time": "13:30 - 14:15", "name": "Інфор. - Історія"},
+    "7": {"time": "14:25 - 15:10", "name": "Матем. ат."}
 }
 
 FRIDAY_SCHEDULE = {
-    "1": {"start": "08:30", "end": "09:15", "name": "Хімія"},
-    "2": {"start": "09:25", "end": "10:10", "name": "Укр. мова"},
-    "3": {"start": "10:25", "end": "11:10", "name": "Біологія"},
-    "4": {"start": "11:30", "end": "12:15", "name": "Укр. мова - Польська"},
-    "5": {"start": "12:35", "end": "13:20", "name": "Історія"},
-    "6": {"start": "13:30", "end": "14:15", "name": "Географія"},
-    "7": {"start": "14:25", "end": "15:10", "name": "Укр. літ."}
-}
-
-WEEK_SCHEDULES = {
-    0: MONDAY_SCHEDULE,
-    1: TUESDAY_SCHEDULE,
-    2: WEDNESDAY_SCHEDULE,
-    3: THURSDAY_SCHEDULE,
-    4: FRIDAY_SCHEDULE
+    "1": {"time": "08:30 - 09:15", "name": "Хімія"},
+    "2": {"time": "09:25 - 10:10", "name": "Укр. мова"},
+    "3": {"time": "10:25 - 11:10", "name": "Біологія"},
+    "4": {"time": "11:30 - 12:15", "name": "Укр. мова - Польська"},
+    "5": {"time": "12:35 - 13:20", "name": "Історія"},
+    "6": {"time": "13:30 - 14:15", "name": "Географія"},
+    "7": {"time": "14:25 - 15:10", "name": "Укр. літ."}
 }
 
 # Головне меню
@@ -414,6 +434,7 @@ async def handle_text_inputs(message: Message, state: FSMContext):
     known_users.add(user_id)
     current_state = await state.get_state()
     
+    # 0. Якщо користувач у режимі створення розсилки "Скинути всім"
     if current_state == BroadcastStates.waiting_for_broadcast_content.state:
         await state.clear()
         
@@ -446,8 +467,8 @@ async def handle_text_inputs(message: Message, state: FSMContext):
         )
         return
 
-    # Перевірка чи створюється ДЗ
-    if user_id in hw_creation_step and hw_creation_step[user_id].get("step") == "waiting_text":
+    # 1. Перевірка чи створюється ДЗ
+    if user_id in hw_creation_step and hw_creation_step[user_id].get("step"] == "waiting_text":
         day = hw_creation_step[user_id]["day"]
         hw_text = message.text
         
@@ -467,7 +488,7 @@ async def handle_text_inputs(message: Message, state: FSMContext):
         )
         return
 
-    # Перевірка чи створюється нагадування
+    # 2. Перевірка чи створюється нагадування
     if user_id in user_creation_step:
         st = user_creation_step[user_id]
         
@@ -572,79 +593,10 @@ async def handle_photo_inputs(message: Message, state: FSMContext):
 
 
 async def send_user_reminder(rem_id: int):
-    if not NOTIFICATIONS_ENABLED:
-        return
-    for item in reminders_list:
-        if item['id'] == rem_id and not item['done']:
-            for uid in known_users:
-                try:
-                    await bot.send_message(chat_id=uid, text=f"⏰ **Нагадування!**\n\n📌 {item['text']}", parse_mode="Markdown")
-                except:
-                    pass
+    pass
 
 
-# --- АВТОМАТИЧНІ СПОВІЩЕННЯ ПРО УРОКИ ---
-
-async def trigger_lesson_start(subject_name: str, lesson_num: str):
-    if not NOTIFICATIONS_ENABLED:
-        return
-    current_week = get_current_week()
-    subject_display = get_subject_with_emoji(subject_name)
-    text = f"🚨 **ПОЧАВСЯ УРОК!** (Урок №{lesson_num})\n\n📚 Предмет: **{subject_display}**\n⚙️ Тиждень: **{current_week}-й**"
-    
-    for uid in known_users:
-        try:
-            await bot.send_message(chat_id=uid, text=text, parse_mode="Markdown")
-        except:
-            pass
-
-async def trigger_lesson_end(subject_name: str, lesson_num: str):
-    if not NOTIFICATIONS_ENABLED:
-        return
-    subject_display = get_subject_with_emoji(subject_name)
-    text = f"🏁 **КІНЕЦЬ УРОКУ!** (Урок №{lesson_num})\n\n📚 Щойно закінчився предмет: **{subject_display}**"
-    
-    for uid in known_users:
-        try:
-            await bot.send_message(chat_id=uid, text=text, parse_mode="Markdown")
-        except:
-            pass
-
-def setup_automated_schedule_jobs():
-    # Налаштування завдань для понеділка-п'ятниці (дні тижня 0-4 у cron)
-    days_cron = ['mon', 'tue', 'wed', 'thu', 'fri']
-    
-    for day_index, day_schedule in WEEK_SCHEDULES.items():
-        cron_day = days_cron[day_index]
-        for lesson_num, lesson_info in day_schedule.items():
-            start_time = lesson_info["start"]
-            end_time = lesson_info["end"]
-            subject = lesson_info["name"]
-            
-            # Парсимо час початку
-            start_hour, start_min = map(int, start_time.split(":"))
-            scheduler.add_job(
-                trigger_lesson_start,
-                'cron',
-                day_of_week=cron_day,
-                hour=start_hour,
-                minute=start_min,
-                args=[subject, lesson_num]
-            )
-            
-            # Парсимо час кінця
-            end_hour, end_min = map(int, end_time.split(":"))
-            scheduler.add_job(
-                trigger_lesson_end,
-                'cron',
-                day_of_week=cron_day,
-                hour=end_hour,
-                minute=end_min,
-                args=[subject, lesson_num]
-            )
-
-
-# --- РОЗКЛАД УРОКІВ (МЕНЮ) ---
+# --- РОЗКЛАД УРОКІВ ---
 
 @router.callback_query(F.data == "show_schedule_menu")
 async def process_schedule_menu(callback: CallbackQuery):
@@ -660,24 +612,26 @@ async def show_schedule_text(callback: CallbackQuery, schedule_dict: dict, day_n
     
     for num, lesson in schedule_dict.items():
         raw_name = lesson['name']
-        lesson_start = lesson['start']
-        lesson_end = lesson['end']
-        lesson_time = f"{lesson_start} - {lesson_end}"
+        lesson_time = lesson['time']
         
         if " - " in raw_name:
             parts = raw_name.split(" - ")
             part1 = parts[0].strip()
             part2 = parts[1].strip()
             
+            teacher1 = get_teacher_for_subject(part1)
+            teacher2 = get_teacher_for_subject(part2)
+            
             if current_week == 1:
-                formatted_name = f"1️⃣ **{get_subject_with_emoji(part1)}**\n   2️⃣ {get_subject_with_emoji(part2)}"
+                formatted_name = f"1️⃣ **{get_subject_with_emoji(part1)}** (👩‍🏫 _{teacher1}_)\n   2️⃣ {get_subject_with_emoji(part2)} (👩‍🏫 _{teacher2}_)"
             else:
-                formatted_name = f"1️⃣ {get_subject_with_emoji(part1)}\n   2️⃣ **{get_subject_with_emoji(part2)}**"
+                formatted_name = f"1️⃣ {get_subject_with_emoji(part1)} (👩‍🏫 _{teacher1}_)\n   2️⃣ **{get_subject_with_emoji(part2)}** (👩‍🏫 _{teacher2}_)"
             
             text += f"▫️ **Урок {num}** ({lesson_time}):\n{formatted_name}\n\n"
         else:
             formatted_name = get_subject_with_emoji(raw_name)
-            text += f"▫️ **{num}.** {formatted_name} — ⏰ `{lesson_time}`\n\n"
+            teacher = get_teacher_for_subject(raw_name)
+            text += f"▫️ **{num}.** {formatted_name} — ⏰ `{lesson_time}`\n   👩‍🏫 Вчитель: _{teacher}_\n\n"
     
     builder = InlineKeyboardBuilder()
     builder.button(text="⬅️ Назад до днів", callback_data="show_schedule_menu")
@@ -707,10 +661,6 @@ async def process_friday(callback: CallbackQuery):
 
 async def main():
     logging.basicConfig(level=logging.INFO)
-    
-    # Налаштовуємо автоматичні сповіщення для всіх уроків за розкладом
-    setup_automated_schedule_jobs()
-    
     scheduler.start()
     
     dp.include_router(router)
