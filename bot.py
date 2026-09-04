@@ -26,7 +26,7 @@ user_creation_step = {}  # Кроки створення нагадування
 homework_list = []       # Список ДЗ
 hw_creation_step = {}    # Кроки запису ДЗ
 
-# База всіх користувачів, які колись запускали бота (зберігаємо унікальні ID)
+# База всіх користувачів, які колись запускали бота
 known_users = set()
 
 # Стани для FSM (режим масового розсилання)
@@ -51,7 +51,7 @@ TEACHERS = {
     "Біологія": "Надія Григорівна",
     "Мист.": "Ірина Василівна",
     "Географія": "Тетяна Теодорівна",
-    "ЗБД - ПФГ": "Надія Григорівна / Надія григорівна"
+    "ЗБД - ПРГ": "Оксана Миколаївна / Іванна Петрівна"
 }
 
 def get_teacher_for_subject(subject_name: str) -> str:
@@ -159,7 +159,7 @@ WEEK_SCHEDULES = {
     4: FRIDAY_SCHEDULE
 }
 
-# Функція автоматичної розсилки сповіщень про урок
+# Функція автоматичної розсилки сповіщень про початок уроку
 async def send_automatic_lesson_notification(day_index: int, lesson_num: str):
     if not NOTIFICATIONS_ENABLED:
         return
@@ -176,7 +176,7 @@ async def send_automatic_lesson_notification(day_index: int, lesson_num: str):
     day_names_ua = ["понеділок", "вівторок", "середу", "четвер", "п'ятницю"]
     day_str = day_names_ua[day_index]
     
-    text = f"🔔 **Увага! Завдано початок уроку ({lesson_time}) на {day_str}!**\n\n"
+    text = f"🔔 **Увага! Початок уроку ({lesson_time}) на {day_str}!**\n\n"
     
     if " - " in raw_name:
         parts = raw_name.split(" - ")
@@ -195,7 +195,47 @@ async def send_automatic_lesson_notification(day_index: int, lesson_num: str):
         teacher = get_teacher_for_subject(raw_name)
         text += f"▫️ **Урок {lesson_num}.** {formatted_name}\n   👩‍🏫 Вчитель: _{teacher}_"
 
-    # Розсилаємо всім користувачам, які коли-небудь запускали бота
+    for uid in known_users:
+        try:
+            await bot.send_message(chat_id=uid, text=text, parse_mode="Markdown")
+        except Exception:
+            pass
+
+# Функція ранкового сповіщення о 08:15 перед першим уроком (Пн-Пт)
+async def send_morning_greeting():
+    if not NOTIFICATIONS_ENABLED:
+        return
+    
+    now = datetime.now()
+    day_index = now.weekday() # 0-4 (Пн-Пт)
+    if day_index > 4:
+        return # Не субота і не неділя
+        
+    schedule = WEEK_SCHEDULES.get(day_index)
+    if not schedule:
+        return
+        
+    current_week = get_current_week()
+    day_names_ua = ["понеділок", "вівторок", "середу", "четвер", "п'ятницю"]
+    day_str = day_names_ua[day_index]
+    
+    text = f"🌅 **Доброго ранку! Розклад на сьогодні ({day_str}), {current_week}-й тиждень:**\n\n"
+    
+    for num, lesson in schedule.items():
+        raw_name = lesson['name']
+        lesson_time = lesson['time']
+        if " - " in raw_name:
+            parts = raw_name.split(" - ")
+            if current_week == 1:
+                subj = parts[0].strip()
+            else:
+                subj = parts[1].strip()
+            text += f"▫️ **{num}.** {get_subject_with_emoji(subj)} (`{lesson_time}`)\n"
+        else:
+            text += f"▫️ **{num}.** {get_subject_with_emoji(raw_name)} (`{lesson_time}`)\n"
+            
+    text += "\n🔔 Перший урок розпочнеться о **08:30**! Гарного дня!"
+
     for uid in known_users:
         try:
             await bot.send_message(chat_id=uid, text=text, parse_mode="Markdown")
@@ -203,35 +243,44 @@ async def send_automatic_lesson_notification(day_index: int, lesson_num: str):
             pass
 
 def setup_lesson_notifications():
-    # Налаштовуємо розклад автоматично для кожного дня (0 = Понеділок, 4 = П'ятниця)
+    # Налаштовуємо розклад дзвінків уроків (Пн-Пт)
     for day_idx, sch in WEEK_SCHEDULES.items():
         for l_num, data in sch.items():
-            start_time_str = data['time'].split(" - ")[0].strip() # Наприклад "08:30"
+            start_time_str = data['time'].split(" - ")[0].strip()
             hour, minute = map(int, start_time_str.split(":"))
             
-            # Додаємо задачу в планувальник (тільки дні Пн-Пт: 'mon-fri')
             scheduler.add_job(
                 send_automatic_lesson_notification,
                 'cron',
-                day_of_week=str(day_idx), # 0-4 відповідають Пн-Пт
+                day_of_week=str(day_idx),
                 hour=hour,
                 minute=minute,
                 args=[day_idx, l_num]
             )
+            
+    # Додаємо ранкове сповіщення о 08:15 з понеділка по п'ятницю
+    scheduler.add_job(
+        send_morning_greeting,
+        'cron',
+        day_of_week='mon-fri',
+        hour=8,
+        minute=15
+    )
 
-# Головне меню
+# Головне меню (з новими кнопками)
 def get_main_keyboard():
     builder = InlineKeyboardBuilder()
+    builder.button(text="🔍 Що зараз?", callback_data="what_is_now")
     builder.button(text="📅 Подивитися розклад", callback_data="show_schedule_menu")
     builder.button(text="📚 Домашнє завдання", callback_data="show_homework")
-    builder.button(text="📘 ГДЗ", callback_data="show_gdz_menu")
+    builder.button(text="📘 ГДЗ та Посилання (НЗ)", callback_data="show_gdz_menu")
     builder.button(text="⏰ Нагадування", callback_data="show_reminders")
     builder.button(text="📢 Скинути всім", callback_data="start_broadcast")
     
     notif_text = "🔕 Вимкнути сповіщення" if NOTIFICATIONS_ENABLED else "🔔 Увімкнути сповіщення"
     builder.button(text=notif_text, callback_data="toggle_notifications")
     
-    builder.adjust(1, 2, 1, 1, 1, 1)
+    builder.adjust(1, 1, 2, 1, 1, 1, 1)
     return builder.as_markup()
 
 def get_cancel_broadcast_kb():
@@ -283,11 +332,73 @@ async def process_toggle_notifications(callback: CallbackQuery):
     )
     await callback.answer("Статус сповіщень змінено!")
 
-# --- РОЗДІЛ ГДЗ ---
+# --- ЛОГІКА КНОПКИ "ЩО ЗАРАЗ?" ---
+
+@router.callback_query(F.data == "what_is_now")
+async def process_what_is_now(callback: CallbackQuery):
+    now = datetime.now()
+    day_index = now.weekday() # 0-4 (Пн-Пт), 5-6 (Сб-Нд)
+    
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⬅️ Назад у меню", callback_data="back_to_main")
+    
+    if day_index > 4:
+        text = "🏖️ **Сьогодні вихідний (субота або неділя)!** Уроків немає, відпочивай! 😎"
+    else:
+        schedule = WEEK_SCHEDULES.get(day_index)
+        current_time_minutes = now.hour * 60 + now.minute
+        current_week = get_current_week()
+        
+        active_lesson = None
+        next_lesson = None
+        
+        for num, lesson in schedule.items():
+            time_parts = lesson['time'].split(" - ")
+            start_h, start_m = map(int, time_parts[0].split(":"))
+            end_h, end_m = map(int, time_parts[1].split(":"))
+            
+            start_total = start_h * 60 + start_m
+            end_total = end_h * 60 + end_m
+            
+            if start_total <= current_time_minutes <= end_total:
+                active_lesson = (num, lesson)
+                break
+            elif current_time_minutes < start_total:
+                next_lesson = (num, lesson)
+                break
+                
+        if active_lesson:
+            num, lesson = active_lesson
+            raw_name = lesson['name']
+            if " - " in raw_name:
+                parts = raw_name.split(" - ")
+                subj = parts[0].strip() if current_week == 1 else parts[1].strip()
+            else:
+                subj = raw_name
+            teacher = get_teacher_for_subject(subj)
+            text = f"🟢 **Зараз іде урок!**\n\n▫️ **Урок {num}** ({lesson['time']})\n📌 {get_subject_with_emoji(subj)}\n👩‍🏫 Вчитель: _{teacher}_"
+        elif next_lesson:
+            num, lesson = next_lesson
+            raw_name = lesson['name']
+            if " - " in raw_name:
+                parts = raw_name.split(" - ")
+                subj = parts[0].strip() if current_week == 1 else parts[1].strip()
+            else:
+                subj = raw_name
+            text = f"⏳ **Зараз перерва або до початку уроків.**\n\nНаступний:\n▫️ **Урок {num}** ({lesson['time']})\n📌 {get_subject_with_emoji(subj)}"
+        else:
+            text = "🏁 **Уроки на сьогодні вже закінчилися!** Можна відпочивати."
+            
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    await callback.answer()
+
+# --- РОЗДІЛ ГДЗ ТА КОРИСНИХ ПОСИЛАНЬ (НЗ) ---
 
 @router.callback_query(F.data == "show_gdz_menu")
 async def process_gdz_menu(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
+    builder.button(text="🌐 Нові Знання (Електронний щоденник)", url="https://nz.ua/")
+    builder.button(text="💻 МійКлас", url="https://www.miklass.com.ua/")
     builder.button(text="🇺🇦 Українська мова (Заболотний)", url="https://4book.org/gdz-reshebniki-ukraina/9-klas/gdz-ukrayinska-mova-9-klas-zabolotniy-nush-2026")
     builder.button(text="📐 Алгебра", url="https://gdzister.com.ua/alhebra")
     builder.button(text="📐 Геометрія", url="https://gdzister.com.ua/heometriia")
@@ -295,7 +406,7 @@ async def process_gdz_menu(callback: CallbackQuery):
     builder.adjust(1)
     
     await callback.message.edit_text(
-        "📘 **Виберіть предмет для перегляду ГДЗ:**",
+        "📘 **Корисні посилання та ГДЗ:**\nОбери потрібний ресурс:",
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
@@ -362,7 +473,7 @@ async def process_hw_day_chosen(callback: CallbackQuery):
     builder.button(text="❌ Скасувати", callback_data="show_homework")
     
     await callback.message.edit_text(
-        f"📅 Обрано день: **{day_name}**\n\n✍️ **Тепер напиши саме домашнє завдання (наприклад: *Математика: № 12, стор. 45*):**",
+        f"📅 Обрано день: **{day_name}**\n\n✍️ **Тепер напиши саме домашнє завдання:**",
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
@@ -461,7 +572,7 @@ async def process_reminder_day_chosen(callback: CallbackQuery):
     builder.button(text="❌ Скасувати", callback_data="show_reminders")
 
     await callback.message.edit_text(
-        f"📅 День обрано: **{days_map[day_code][0]}**\n\n⏰ **Тепер напишіть годину у форматі Година:Хвилина (наприклад: 14:30 або 08:15):**",
+        f"📅 День обрано: **{days_map[day_code][0]}**\n\n⏰ **Тепер напишіть годину у форматі Година:Хвилина (наприклад: 14:30):**",
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
@@ -483,7 +594,7 @@ async def process_start_broadcast(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BroadcastStates.waiting_for_broadcast_content)
     await callback.message.edit_text(
         "📢 **Режим масової розсилки**\n\n"
-        "Надішли текст або скріншот (фото), і бот миттєво перешле його всім користувачам бота разом із твоїм ніком!",
+        "Надішли текст або скріншот (фото), і бот миттєво перешле його всім користувачам бота!",
         reply_markup=get_cancel_broadcast_kb(),
         parse_mode="Markdown"
     )
@@ -520,9 +631,7 @@ async def handle_text_inputs(message: Message, state: FSMContext):
         builder.button(text="🏠 Головне меню", callback_data="back_to_main")
         
         await message.answer(
-            f"✅ **Розсилку завершено!**\n"
-            f"• Успішно доставлено: {success_count}\n"
-            f"• Помилок (заблокували бота): {fail_count}",
+            f"✅ **Розсилку завершено!**\n• Успішно доставлено: {success_count}",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
@@ -542,7 +651,7 @@ async def handle_text_inputs(message: Message, state: FSMContext):
         builder.adjust(1)
         
         await message.answer(
-            f"✅ **Домашнє завдання успішно записано!**\n\n📅 День: **{day}**\n📌 Завдання: {hw_text}",
+            f"✅ **Домашнє завдання успішно записане!**\n\n📅 День: **{day}**\n📌 Завдання: {hw_text}",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
@@ -570,7 +679,7 @@ async def handle_text_inputs(message: Message, state: FSMContext):
                 if not (0 <= hour <= 23 and 0 <= minute <= 59):
                     raise ValueError()
             except:
-                await message.answer("❌ Неправильний формат часу. Введіть у форматі Година:Хвилина, наприклад `14:30`:", parse_mode="Markdown")
+                await message.answer("❌ Неправильний формат часу. Введіть у форматі Година:Хвилина (наприклад `14:30`):", parse_mode="Markdown")
                 return
             
             rem_id = len(reminders_list) + 1
@@ -600,7 +709,7 @@ async def handle_text_inputs(message: Message, state: FSMContext):
             builder.adjust(1)
             
             await message.answer(
-                f"✅ **Нагадування успішно створено!**\n\n📌 Що: {new_reminder['text']}\n📅 Коли: {new_reminder['day_name']} о {time_text}",
+                f"✅ **Нагадування створено!**\n\n📌 Що: {new_reminder['text']}\n📅 Коли: {new_reminder['day_name']} о {time_text}",
                 reply_markup=builder,
                 parse_mode="Markdown"
             )
@@ -613,41 +722,22 @@ async def handle_photo_inputs(message: Message, state: FSMContext):
     
     if current_state == BroadcastStates.waiting_for_broadcast_content.state:
         await state.clear()
-        
         user = message.from_user
-        username_str = f"@{user.username}" if user.username else "немає юзернейму"
         user_link = f"<a href='tg://user?id={user.id}'>{user.first_name}</a>"
-        header = f"📢 <b>Скріншот/фото від {user_link}</b> ({username_str}):\n"
+        header = f"📢 <b>Фото від {user_link}</b>:\n"
         
         photo_file_id = message.photo[-1].file_id
         caption = message.caption if message.caption else ""
-        full_caption = header + caption
-        
-        success_count = 0
-        fail_count = 0
         
         for uid in known_users:
             try:
-                await bot.send_photo(
-                    chat_id=uid,
-                    photo=photo_file_id,
-                    caption=full_caption,
-                    parse_mode="HTML"
-                )
-                success_count += 1
+                await bot.send_photo(chat_id=uid, photo=photo_file_id, caption=header+caption, parse_mode="HTML")
             except Exception:
-                fail_count += 1
+                pass
                 
         builder = InlineKeyboardBuilder()
         builder.button(text="🏠 Головне меню", callback_data="back_to_main")
-        
-        await message.answer(
-            f"✅ **Розсилку фото завершено!**\n"
-            f"• Успішно доставлено: {success_count}\n"
-            f"• Помилок: {fail_count}",
-            reply_markup=builder.as_markup(),
-            parse_mode="Markdown"
-        )
+        await message.answer("✅ **Розсилку фото завершено!**", reply_markup=builder.as_markup(), parse_mode="Markdown")
 
 
 async def send_user_reminder(rem_id: int):
@@ -676,7 +766,6 @@ async def show_schedule_text(callback: CallbackQuery, schedule_dict: dict, day_n
             parts = raw_name.split(" - ")
             part1 = parts[0].strip()
             part2 = parts[1].strip()
-            
             teacher1 = get_teacher_for_subject(part1)
             teacher2 = get_teacher_for_subject(part2)
             
@@ -720,11 +809,10 @@ async def process_friday(callback: CallbackQuery):
 async def main():
     logging.basicConfig(level=logging.INFO)
     
-    # Автоматично налаштовуємо розсилку сповіщень по годинах уроків на Пн-Пт
+    # Налаштовуємо всі фонові задачі (розклад уроків, ранковий дзвінок)
     setup_lesson_notifications()
     
     scheduler.start()
-    
     dp.include_router(router)
     
     await bot.delete_webhook(drop_pending_updates=True)
