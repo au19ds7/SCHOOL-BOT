@@ -8,11 +8,15 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from google import genai
+from PIL import Image
+import io
 
-# Токен твого бота
+# Токени та ключі
 TOKEN = "8952184969:AAHS21Naqs1Hmtvpvi7Eh-oNcclRZFCMj9Q"
+GEMINI_API_KEY = "AQ.Ab8RN6K1T7Oob-DdHDVRXvRJREBpQlaYCzESys5T4H9EqkuHTw"
 
-# Твій юзернейм для надсилання анонімних повідомлень
+# Твій юзернейм для надсилання анонімних запитань адміну
 ADMIN_USERNAME = "fyto3"
 
 # Змінна для керування статусом сповіщень (увімкнено за замовчуванням)
@@ -23,23 +27,29 @@ dp = Dispatcher()
 router = Router()
 scheduler = AsyncIOScheduler(timezone="Europe/Kiev")
 
+# Клієнт Google GenAI для розв'язання задач
+ai_client = genai.Client(api_key=GEMINI_API_KEY)
+
 # Словники та бази даних в пам'яті
 reminders_list = []      # Список нагадувань
 user_creation_step = {}  # Кроки створення нагадування
-homework_list = []       # Список ДЗ: зберігає словники {"id": int, "user_id": int, "day": str, "text": str}
+homework_list = []       # Список ДЗ
 hw_creation_step = {}    # Кроки запису ДЗ
 
 # Бази даних для Рейтингу доброти
-kindness_ratings = {}    # {user_id: {"name": "Ім'я", "username": "user", "score": 0}}
-user_votes_history = {}  # {(from_user_id, target_user_id): "like"/"dislike"}
+kindness_ratings = {}    
+user_votes_history = {}  
 
 # База всіх користувачів, які колись запускали бота
-known_users = set()
+known_users = {}
 
 # Стани для FSM
 class BroadcastStates(StatesGroup):
     waiting_for_broadcast_content = State()
     waiting_for_anonymous_message = State()
+    waiting_for_anon_target = State()     # Очікування юзернейму одержувача анонімки
+    waiting_for_anon_text = State()       # Очікування тексту анонімного повідомлення
+    waiting_for_solver_photo = State()    # Очікування фото з задачею для ШІ
 
 class RatingStates(StatesGroup):
     waiting_for_username = State()
@@ -203,24 +213,20 @@ WEEK_SCHEDULES = {
     4: FRIDAY_SCHEDULE
 }
 
-# --- АВТОМАТИЧНЕ ЩОДЕННЕ НАГАДУВАННЯ ПРО ДЗ О 16:00 ---
+# --- АВТОМАТИЧНІ СПОВІЩЕННЯ ---
 async def send_evening_homework_reminder():
     if not NOTIFICATIONS_ENABLED:
         return
         
-    # Визначаємо поточний день тижня (0 - Пн, 1 - Вт ... 6 - Нд)
     now = datetime.now()
     weekday_index = now.weekday()
     
     day_names_ua = ["Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця", "Субота", "Неділя"]
     today_name = day_names_ua[weekday_index]
     
-    # Шукаємо, у якого користувача є ДЗ на сьогодні
-    # Збираємо унікальних користувачів, які щось записували
     all_users = set(item['user_id'] for item in homework_list)
     
     for uid in all_users:
-        # Фільтруємо ДЗ конкретного користувача на сьогодні
         user_hw_today = [item for item in homework_list if item['user_id'] == uid and item['day'].lower() == today_name.lower()]
         
         if user_hw_today:
@@ -234,7 +240,6 @@ async def send_evening_homework_reminder():
             except Exception:
                 pass
 
-# Автоматична розсилка про початок уроку
 async def send_automatic_lesson_notification(day_index: int, lesson_num: str):
     if not NOTIFICATIONS_ENABLED:
         return
@@ -276,7 +281,6 @@ async def send_automatic_lesson_notification(day_index: int, lesson_num: str):
         except Exception:
             pass
 
-# Ранкове сповіщення о 08:15
 async def send_morning_greeting():
     if not NOTIFICATIONS_ENABLED:
         return
@@ -337,7 +341,6 @@ def setup_lesson_notifications():
         minute=15
     )
     
-    # Додаємо щоденну задачу на 16:00 для нагадування про ДЗ
     scheduler.add_job(
         send_evening_homework_reminder,
         'cron',
@@ -345,23 +348,25 @@ def setup_lesson_notifications():
         minute=0
     )
 
-# Головне меню
+# Головне меню (з новою кнопкою ШІ-розв'язателя)
 def get_main_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="🔍 Що зараз?", callback_data="what_is_now")
     builder.button(text="🧹 Хто черговий?", callback_data="who_is_duty")
+    builder.button(text="🧠 Розв'язати задачу (ШІ)", callback_data="start_ai_solver")
     builder.button(text="📅 Подивитися розклад", callback_data="show_schedule_menu")
     builder.button(text="📚 Домашнє завдання", callback_data="show_homework")
     builder.button(text="📘 ГДЗ та Посилання (НЗ)", callback_data="show_gdz_menu")
     builder.button(text="⭐ Рейтинг доброти", callback_data="show_kindness_rating")
     builder.button(text="🤫 Анонімне запитання / скарга", callback_data="start_anonymous")
+    builder.button(text="👤🤫 Написати анонімно людині", callback_data="start_anon_to_user")
     builder.button(text="⏰ Нагадування", callback_data="show_reminders")
     builder.button(text="📢 Скинути всім", callback_data="start_broadcast")
     
     notif_text = "🔕 Вимкнути сповіщення" if NOTIFICATIONS_ENABLED else "🔔 Увімкнути сповіщення"
     builder.button(text=notif_text, callback_data="toggle_notifications")
     
-    builder.adjust(1, 1, 1, 2, 1, 1, 1, 1, 1, 1)
+    builder.adjust(1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1)
     return builder.as_markup()
 
 def get_cancel_broadcast_kb():
@@ -382,7 +387,12 @@ def get_days_keyboard():
 
 @router.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext):
-    known_users.add(message.chat.id)
+    user = message.from_user
+    known_users[user.id] = {
+        "id": user.id,
+        "username": user.username if user.username else "",
+        "first_name": user.first_name
+    }
     await state.clear()
     status = "увімкнені ✅" if NOTIFICATIONS_ENABLED else "вимкнені ❌"
     await message.answer(
@@ -392,7 +402,12 @@ async def cmd_start(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "back_to_main")
 async def process_back_to_main(callback: CallbackQuery, state: FSMContext):
-    known_users.add(callback.message.chat.id)
+    user = callback.from_user
+    known_users[user.id] = {
+        "id": user.id,
+        "username": user.username if user.username else "",
+        "first_name": user.first_name
+    }
     await state.clear()
     status = "увімкнені ✅" if NOTIFICATIONS_ENABLED else "вимкнені ❌"
     await callback.message.edit_text(
@@ -609,7 +624,22 @@ async def process_rate_value(callback: CallbackQuery):
         
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
-# --- АНОНІМНІ ЗАПИТАННЯ ТА СКАРГИ ---
+# --- РОЗВ'ЯЗАТИ ЗАДАЧУ ПО ФОТО (ШІ) ---
+@router.callback_query(F.data == "start_ai_solver")
+async def process_start_ai_solver(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(BroadcastStates.waiting_for_solver_photo)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="❌ Скасувати", callback_data="back_to_main")
+    
+    await callback.message.edit_text(
+        "🧠 **Розв'язання задач та прикладів за допомогою ШІ**\n\n"
+        "📸 Надішли мені фото з прикладом, рівнянням чи задачею, і я розпишу покрокове розв'язання українською мовою!",
+        reply_markup=builder.as_markup(),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+# --- АНОНІМНЕ ЗАПИТАННЯ АДМІНІСТРАТОРУ ---
 @router.callback_query(F.data == "start_anonymous")
 async def process_start_anonymous(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BroadcastStates.waiting_for_anonymous_message)
@@ -617,9 +647,24 @@ async def process_start_anonymous(callback: CallbackQuery, state: FSMContext):
     builder.button(text="❌ Скасувати", callback_data="back_to_main")
     
     await callback.message.edit_text(
-        "🤫 **Анонімна скарбничка (питання та скарги)**\n\n"
+        "🤫 **Анонімна скарбничка (питання та скарги адміністратору)**\n\n"
         "Напиши своє запитання або скаргу текстом (чи надішли фото). "
         "Ніхто, крім адміністратора (`fyto3`), не дізнається, хто це надіслав! 🔒",
+        reply_markup=builder.as_markup(),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+# --- АНОНІМНЕ ПОВІДОМЛЕННЯ БУДЬ-ЯКОМУ КОРИСТУВАЧУ БОТА ---
+@router.callback_query(F.data == "start_anon_to_user")
+async def process_start_anon_to_user(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(BroadcastStates.waiting_for_anon_target)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="❌ Скасувати", callback_data="back_to_main")
+    
+    await callback.message.edit_text(
+        "👤🤫 **Написати анонімне повідомлення людині з бота**\n\n"
+        "Введи **юзернейм** людини, якій хочеш написати (наприклад: `@username` або просто `username`):",
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
@@ -828,23 +873,96 @@ async def process_start_broadcast(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
+# Текстові обробники для FSM
 @router.message(F.text & ~F.text.startswith("/"))
 async def handle_text_inputs(message: Message, state: FSMContext):
-    user_id = message.from_user.id
-    known_users.add(user_id)
+    user = message.from_user
+    user_id = user.id
+    known_users[user_id] = {
+        "id": user_id,
+        "username": user.username if user.username else "",
+        "first_name": user.first_name
+    }
+    
     current_state = await state.get_state()
     
+    # 1. Обробка введення юзернейму для анонімного повідомлення іншій людині
+    if current_state == BroadcastStates.waiting_for_anon_target.state:
+        target_username = message.text.strip().lstrip("@").lower()
+        
+        found_target_id = None
+        for uid, udata in known_users.items():
+            if udata["username"].lower() == target_username:
+                found_target_id = uid
+                break
+                
+        if not found_target_id:
+            builder = InlineKeyboardBuilder()
+            builder.button(text="🏠 Головне меню", callback_data="back_to_main")
+            await message.answer(
+                f"❌ Користувача з юзернеймом **@{target_username}** не знайдено в базі бота.\n"
+                "Ця людина має хоча б один раз запустити цього бота (`/start`), щоб він міг отримувати повідомлення!",
+                reply_markup=builder.as_markup(),
+                parse_mode="Markdown"
+            )
+            await state.clear()
+            return
+            
+        await state.update_data(target_id=found_target_id, target_username=target_username)
+        await state.set_state(BroadcastStates.waiting_for_anon_text)
+        
+        builder = InlineKeyboardBuilder()
+        builder.button(text="❌ Скасувати", callback_data="back_to_main")
+        await message.answer(
+            f"✅ Користувача @{target_username} знайдено!\n\n✍️ **Тепер напиши текст анонімного повідомлення, яке йому надішлють:**",
+            reply_markup=builder.as_markup(),
+            parse_mode="Markdown"
+        )
+        return
+
+    # 2. Обробка тексту анонімного повідомлення для обраного користувача
+    if current_state == BroadcastStates.waiting_for_anon_text.state:
+        data = await state.get_data()
+        target_id = data.get("target_id")
+        target_username = data.get("target_username")
+        await state.clear()
+        
+        anon_msg_text = f"🤫 **Тобі прийшло нове анонімне повідомлення:**\n\n{message.text}"
+        
+        try:
+            await bot.send_message(chat_id=target_id, text=anon_msg_text, parse_mode="Markdown")
+            success = True
+        except Exception:
+            success = False
+            
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🏠 Головне меню", callback_data="back_to_main")
+        
+        if success:
+            await message.answer(
+                f"✅ **Анонімне повідомлення успішно надіслано користувачу @{target_username}!**",
+                reply_markup=builder.as_markup(),
+                parse_mode="Markdown"
+            )
+        else:
+            await message.answer(
+                "❌ Не вдалося надіслати повідомлення (можливо, користувач заблокував бота).",
+                reply_markup=builder.as_markup(),
+                parse_mode="Markdown"
+            )
+        return
+
+    # 3. Анонімне запитання адміністратору
     if current_state == BroadcastStates.waiting_for_anonymous_message.state:
         await state.clear()
         anonymous_text = f"🤫 **Нове анонімне повідомлення (скарга/питання):**\n\n{message.text}"
         
-        for uid in known_users:
-            try:
-                chat_member = await bot.get_chat(uid)
-                if chat_member.username and chat_member.username.lower() == ADMIN_USERNAME.lower():
+        for uid, udata in known_users.items():
+            if udata["username"].lower() == ADMIN_USERNAME.lower():
+                try:
                     await bot.send_message(chat_id=uid, text=anonymous_text, parse_mode="Markdown")
-            except Exception:
-                pass
+                except Exception:
+                    pass
                 
         builder = InlineKeyboardBuilder()
         builder.button(text="🏠 Головне меню", callback_data="back_to_main")
@@ -856,9 +974,9 @@ async def handle_text_inputs(message: Message, state: FSMContext):
         )
         return
 
+    # 4. Масова розсилка
     if current_state == BroadcastStates.waiting_for_broadcast_content.state:
         await state.clear()
-        user = message.from_user
         username_str = f"@{user.username}" if user.username else "немає юзернейму"
         user_link = f"<a href='tg://user?id={user.id}'>{user.first_name}</a>"
         header = f"📢 <b>Повідомлення від {user_link}</b> ({username_str}):\n\n"
@@ -882,7 +1000,7 @@ async def handle_text_inputs(message: Message, state: FSMContext):
         )
         return
 
-    # Збереження ДЗ із прив'язкою до юзернейму/ID користувача
+    # Збереження ДЗ
     if user_id in hw_creation_step and hw_creation_step[user_id].get("step") == "waiting_text":
         day = hw_creation_step[user_id]["day"]
         hw_text = message.text
@@ -962,31 +1080,71 @@ async def handle_text_inputs(message: Message, state: FSMContext):
 
 @router.message(F.photo)
 async def handle_photo_inputs(message: Message, state: FSMContext):
-    known_users.add(message.from_user.id)
+    user = message.from_user
+    known_users[user.id] = {
+        "id": user.id,
+        "username": user.username if user.username else "",
+        "first_name": user.first_name
+    }
+    
     current_state = await state.get_state()
     
+    # 1. Обробка фото для ШІ-розв'язателя задач
+    if current_state == BroadcastStates.waiting_for_solver_photo.state:
+        processing_msg = await message.answer("⏳ **Аналізую зображення та шукаю розв'язання...** 🧠")
+        try:
+            photo = message.photo[-1]
+            file_info = await bot.get_file(photo.file_id)
+            downloaded_file = await bot.download_file(file_info.file_path)
+            
+            image = Image.open(downloaded_file)
+            
+            response = ai_client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=[
+                    image,
+                    "Розв'яжи цю задачу або приклад з фото крок за кроком. Напиши детальне, зрозуміле пояснення українською мовою."
+                ]
+            )
+            
+            builder = InlineKeyboardBuilder()
+            builder.button(text="📸 Розв'язати ще", callback_data="start_ai_solver")
+            builder.button(text="🏠 Головне меню", callback_data="back_to_main")
+            builder.adjust(1)
+            
+            await message.answer(f"💡 **Розв'язання від ШІ:**\n\n{response.text}", reply_markup=builder.as_markup(), parse_mode="Markdown")
+        except Exception as e:
+            await message.answer(f"❌ Сталася помилка при розв'язанні: {e}")
+        finally:
+            await state.clear()
+            try:
+                await bot.delete_message(chat_id=message.chat.id, message_id=processing_msg.message_id)
+            except:
+                pass
+        return
+
+    # 2. Обробка анонімного фото для адміністратора
     if current_state == BroadcastStates.waiting_for_anonymous_message.state:
         await state.clear()
         photo_file_id = message.photo[-1].file_id
         caption = message.caption if message.caption else ""
         header = f"🤫 <b>Нове анонімне фото (скарга/питання):</b>\n{caption}"
         
-        for uid in known_users:
-            try:
-                chat_member = await bot.get_chat(uid)
-                if chat_member.username and chat_member.username.lower() == ADMIN_USERNAME.lower():
+        for uid, udata in known_users.items():
+            if udata["username"].lower() == ADMIN_USERNAME.lower():
+                try:
                     await bot.send_photo(chat_id=uid, photo=photo_file_id, caption=header, parse_mode="HTML")
-            except Exception:
-                pass
+                except Exception:
+                    pass
                 
         builder = InlineKeyboardBuilder()
         builder.button(text="🏠 Головне меню", callback_data="back_to_main")
         await message.answer("✅ **Твоє анонімне фото успішно надіслано адміністратору!**", reply_markup=builder.as_markup(), parse_mode="Markdown")
         return
 
+    # 3. Обробка фото для масової розсилки
     if current_state == BroadcastStates.waiting_for_broadcast_content.state:
         await state.clear()
-        user = message.from_user
         user_link = f"<a href='tg://user?id={user.id}'>{user.first_name}</a>"
         header = f"📢 <b>Фото від {user_link}</b>:\n"
         
