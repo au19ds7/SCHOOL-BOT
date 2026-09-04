@@ -103,7 +103,7 @@ def get_subject_with_emoji(name: str) -> str:
     else:
         return f"📖 {name}"
 
-# --- ЛОГІКА РОЗРАХУНКУ ЧЕРГОВОЇ ПАРТИ (3 -> 15 -> 1 -> 2 -> 3) ---
+# --- ЛОГІКА РОЗРАХУНКУ ЧЕРГОВОЇ ПАРТИ (Зсунуто на 3) ---
 def get_duty_desk_info(target_date=None):
     if target_date is None:
         target_date = datetime.now()
@@ -122,7 +122,7 @@ def get_duty_desk_info(target_date=None):
             total_school_days += 1
         curr = datetime.fromordinal(curr.toordinal() + 1)
         
-    # Повний цикл із 15 парт: після 15 йде 1, потім 2, і знову 3
+    # Зсув на 3 (додаємо 2 до загальної кількості днів)
     desk_number = ((total_school_days - 1 + 2) % 15) + 1
     
     day_names = ["Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця"]
