@@ -348,7 +348,7 @@ def setup_lesson_notifications():
         minute=0
     )
 
-# Головне меню (з новою кнопкою ШІ-розв'язателя)
+# Головне меню
 def get_main_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="🔍 Що зараз?", callback_data="what_is_now")
