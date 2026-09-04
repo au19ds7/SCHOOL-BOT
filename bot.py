@@ -35,7 +35,7 @@ class BroadcastStates(StatesGroup):
 
 # Словник вчителів за предметами (на основі твого фото)
 TEACHERS = {
-    "Англ. мова": "Іноземна мова (перша) — Галина Зиновіївна / Людмила Петрівна", # або за контекстом
+    "Англ. мова": "Галина Зиновіївна / Людмила Петрівна",
     "Хімія": "Володимир Леонідович",
     "Укр. мова": "Ольга Степанівна",
     "Укр. літ.": "Наталія Вікторівна",
@@ -467,8 +467,8 @@ async def handle_text_inputs(message: Message, state: FSMContext):
         )
         return
 
-    # 1. Перевірка чи створюється ДЗ
-    if user_id in hw_creation_step and hw_creation_step[user_id].get("step"] == "waiting_text":
+    # 1. Перевірка чи створюється ДЗ (виправлено виклик .get)
+    if user_id in hw_creation_step and hw_creation_step[user_id].get("step") == "waiting_text":
         day = hw_creation_step[user_id]["day"]
         hw_text = message.text
         
