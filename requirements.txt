@@ -1,4 +1,5 @@
-google-genai
 aiogram
 apscheduler
+google-genai
 Pillow
+tzdata
