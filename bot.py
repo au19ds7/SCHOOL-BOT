@@ -103,7 +103,7 @@ def get_subject_with_emoji(name: str) -> str:
     else:
         return f"📖 {name}"
 
-# --- ЛОГІКА РОЗРАХУНКУ ЧЕРГОВОЇ ПАРТИ (Зсунуто на 3) ---
+# --- ВИПРАВЛЕНА ЛОГІКА (щоб зараз видавало 3-тю парту замість 14-ї) ---
 def get_duty_desk_info(target_date=None):
     if target_date is None:
         target_date = datetime.now()
@@ -113,7 +113,6 @@ def get_duty_desk_info(target_date=None):
     if weekday >= 5:
         return "Вихідний день (субота або неділя). Чергових немає! 🎉"
     
-    # Рахуємо загальну кількість робочих днів (Пн-Пт) від початку року
     start_of_year = datetime(target_date.year, 1, 1)
     total_school_days = 0
     curr = start_of_year
@@ -122,8 +121,8 @@ def get_duty_desk_info(target_date=None):
             total_school_days += 1
         curr = datetime.fromordinal(curr.toordinal() + 1)
         
-    # Зсув на 3 (додаємо 2 до загальної кількості днів)
-    desk_number = ((total_school_days - 1 + 2) % 15) + 1
+    # Змінюємо зсув, щоб сьогодні випало рівно на 3
+    desk_number = ((total_school_days - 1 + 3 - 14) % 15) + 1
     
     day_names = ["Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця"]
     return f"🏫 Сьогодні **{day_names[weekday]}**.\n🧹 Чергова парта на сьогодні: **{desk_number} парта**."
