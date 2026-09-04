@@ -26,7 +26,7 @@ scheduler = AsyncIOScheduler(timezone="Europe/Kiev")
 # Словники та бази даних в пам'яті
 reminders_list = []      # Список нагадувань
 user_creation_step = {}  # Кроки створення нагадування
-homework_list = []       # Список ДЗ
+homework_list = []       # Список ДЗ: зберігає словники {"id": int, "user_id": int, "day": str, "text": str}
 hw_creation_step = {}    # Кроки запису ДЗ
 
 # Бази даних для Рейтингу доброти
@@ -110,17 +110,15 @@ def get_subject_with_emoji(name: str) -> str:
     else:
         return f"📖 {name}"
 
-# --- ЛОГІКА ЧЕРГУВАНЬ ПАРТ (Цикл 1-15, сьогодні = 3) ---
+# --- ЛОГІКА ЧЕРГУВАНЬ ПАРТ ---
 def get_duty_desk_info(target_date=None):
     if target_date is None:
         target_date = datetime.now()
     
-    weekday = target_date.weekday() # 0-Пн, 1-Вт, 2-Ср, 3-Чт, 4-Пт, 5-Сб, 6-Нд
-    
+    weekday = target_date.weekday()
     if weekday >= 5:
         return "Вихідний день (субота або неділя). Чергових немає! 🎉"
     
-    # Опорна дата: сьогодні (п'ятниця, 4 вересня 2026 р.) має парту №3
     anchor_date = datetime(2026, 9, 4)
     anchor_desk = 3
     
@@ -142,7 +140,6 @@ def get_duty_desk_info(target_date=None):
             d -= timedelta(days=1)
             
     desk_number = ((anchor_desk - 1 + school_days_diff) % 15) + 1
-    
     day_names = ["Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця"]
     return f"🏫 Сьогодні **{day_names[weekday]}**.\n🧹 Чергова парта на сьогодні: **{desk_number} парта**."
 
@@ -206,7 +203,38 @@ WEEK_SCHEDULES = {
     4: FRIDAY_SCHEDULE
 }
 
-# Функція автоматичної розсилки сповіщень про початок уроку
+# --- АВТОМАТИЧНЕ ЩОДЕННЕ НАГАДУВАННЯ ПРО ДЗ О 16:00 ---
+async def send_evening_homework_reminder():
+    if not NOTIFICATIONS_ENABLED:
+        return
+        
+    # Визначаємо поточний день тижня (0 - Пн, 1 - Вт ... 6 - Нд)
+    now = datetime.now()
+    weekday_index = now.weekday()
+    
+    day_names_ua = ["Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця", "Субота", "Неділя"]
+    today_name = day_names_ua[weekday_index]
+    
+    # Шукаємо, у якого користувача є ДЗ на сьогодні
+    # Збираємо унікальних користувачів, які щось записували
+    all_users = set(item['user_id'] for item in homework_list)
+    
+    for uid in all_users:
+        # Фільтруємо ДЗ конкретного користувача на сьогодні
+        user_hw_today = [item for item in homework_list if item['user_id'] == uid and item['day'].lower() == today_name.lower()]
+        
+        if user_hw_today:
+            text = f"⏰ **Вечірнє нагадування о 16:00!**\n\nТи записував домашнє завдання на сьогодні (**{today_name}**):\n"
+            for item in user_hw_today:
+                text += f"📌 {item['text']}\n"
+            text += "\n_Не забудь зробити уроки! 💪_"
+            
+            try:
+                await bot.send_message(chat_id=uid, text=text, parse_mode="Markdown")
+            except Exception:
+                pass
+
+# Автоматична розсилка про початок уроку
 async def send_automatic_lesson_notification(day_index: int, lesson_num: str):
     if not NOTIFICATIONS_ENABLED:
         return
@@ -248,7 +276,7 @@ async def send_automatic_lesson_notification(day_index: int, lesson_num: str):
         except Exception:
             pass
 
-# Функція ранкового сповіщення о 08:15
+# Ранкове сповіщення о 08:15
 async def send_morning_greeting():
     if not NOTIFICATIONS_ENABLED:
         return
@@ -307,6 +335,14 @@ def setup_lesson_notifications():
         day_of_week='mon-fri',
         hour=8,
         minute=15
+    )
+    
+    # Додаємо щоденну задачу на 16:00 для нагадування про ДЗ
+    scheduler.add_job(
+        send_evening_homework_reminder,
+        'cron',
+        hour=16,
+        minute=0
     )
 
 # Головне меню
@@ -668,7 +704,7 @@ async def process_hw_day_chosen(callback: CallbackQuery):
     builder.button(text="❌ Скасувати", callback_data="show_homework")
     
     await callback.message.edit_text(
-        f"📅 Обрано день: **{day_name}**\n\n✍️ **Тепер напиши саме домашнє завдання:**",
+        f"📅 Обрано день: **{day_name}**\n\n✍️ **Тепер напиши саме домашнє завдання (наприклад: *Математика, номер 412*):**",
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
@@ -846,12 +882,13 @@ async def handle_text_inputs(message: Message, state: FSMContext):
         )
         return
 
+    # Збереження ДЗ із прив'язкою до юзернейму/ID користувача
     if user_id in hw_creation_step and hw_creation_step[user_id].get("step") == "waiting_text":
         day = hw_creation_step[user_id]["day"]
         hw_text = message.text
         
         hw_id = len(homework_list) + 1
-        homework_list.append({"id": hw_id, "day": day, "text": hw_text})
+        homework_list.append({"id": hw_id, "user_id": user_id, "day": day, "text": hw_text})
         del hw_creation_step[user_id]
         
         builder = InlineKeyboardBuilder()
@@ -860,7 +897,7 @@ async def handle_text_inputs(message: Message, state: FSMContext):
         builder.adjust(1)
         
         await message.answer(
-            f"✅ **Домашнє завдання успішно записане!**\n\n📅 День: **{day}**\n📌 Завдання: {hw_text}",
+            f"✅ **Домашнє завдання успішно записане!**\n\n📅 День: **{day}**\n📌 Завдання: {hw_text}\n\n_💡 О 16:00 ти отримаєш вечірнє нагадування про це завдання, якщо воно на сьогодні!_",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
@@ -919,7 +956,7 @@ async def handle_text_inputs(message: Message, state: FSMContext):
             
             await message.answer(
                 f"✅ **Нагадування створено!**\n\n📌 Що: {new_reminder['text']}\n📅 Коли: {new_reminder['day_name']} о {time_text}",
-                reply_markup=builder,
+                reply_markup=builder.as_markup(),
                 parse_mode="Markdown"
             )
 
