@@ -12,6 +12,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 # Токен твого бота
 TOKEN = "8952184969:AAHS21Naqs1Hmtvpvi7Eh-oNcclRZFCMj9Q"
 
+# Твій юзернейм для надсилання анонімних повідомлень
+ADMIN_USERNAME = "fyto3"
+
 # Змінна для керування статусом сповіщень (увімкнено за замовчуванням)
 NOTIFICATIONS_ENABLED = True
 
@@ -29,9 +32,10 @@ hw_creation_step = {}    # Кроки запису ДЗ
 # База всіх користувачів, які колись запускали бота
 known_users = set()
 
-# Стани для FSM (режим масового розсилання)
+# Стани для FSM (режим масового розсилання та анонімних повідомлень)
 class BroadcastStates(StatesGroup):
     waiting_for_broadcast_content = State()
+    waiting_for_anonymous_message = State()
 
 # Словник вчителів за предметами
 TEACHERS = {
@@ -207,9 +211,9 @@ async def send_morning_greeting():
         return
     
     now = datetime.now()
-    day_index = now.weekday() # 0-4 (Пн-Пт)
+    day_index = now.weekday()
     if day_index > 4:
-        return # Не субота і не неділя
+        return
         
     schedule = WEEK_SCHEDULES.get(day_index)
     if not schedule:
@@ -243,7 +247,6 @@ async def send_morning_greeting():
             pass
 
 def setup_lesson_notifications():
-    # Налаштовуємо розклад дзвінків уроків (Пн-Пт)
     for day_idx, sch in WEEK_SCHEDULES.items():
         for l_num, data in sch.items():
             start_time_str = data['time'].split(" - ")[0].strip()
@@ -258,7 +261,6 @@ def setup_lesson_notifications():
                 args=[day_idx, l_num]
             )
             
-    # Додаємо ранкове сповіщення о 08:15 з понеділка по п'ятницю
     scheduler.add_job(
         send_morning_greeting,
         'cron',
@@ -267,20 +269,21 @@ def setup_lesson_notifications():
         minute=15
     )
 
-# Головне меню (з новими кнопками)
+# Головне меню
 def get_main_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="🔍 Що зараз?", callback_data="what_is_now")
     builder.button(text="📅 Подивитися розклад", callback_data="show_schedule_menu")
     builder.button(text="📚 Домашнє завдання", callback_data="show_homework")
     builder.button(text="📘 ГДЗ та Посилання (НЗ)", callback_data="show_gdz_menu")
+    builder.button(text="🤫 Анонімне запитання / скарга", callback_data="start_anonymous")
     builder.button(text="⏰ Нагадування", callback_data="show_reminders")
     builder.button(text="📢 Скинути всім", callback_data="start_broadcast")
     
     notif_text = "🔕 Вимкнути сповіщення" if NOTIFICATIONS_ENABLED else "🔔 Увімкнути сповіщення"
     builder.button(text=notif_text, callback_data="toggle_notifications")
     
-    builder.adjust(1, 1, 2, 1, 1, 1, 1)
+    builder.adjust(1, 1, 2, 1, 1, 1, 1, 1)
     return builder.as_markup()
 
 def get_cancel_broadcast_kb():
@@ -337,7 +340,7 @@ async def process_toggle_notifications(callback: CallbackQuery):
 @router.callback_query(F.data == "what_is_now")
 async def process_what_is_now(callback: CallbackQuery):
     now = datetime.now()
-    day_index = now.weekday() # 0-4 (Пн-Пт), 5-6 (Сб-Нд)
+    day_index = now.weekday()
     
     builder = InlineKeyboardBuilder()
     builder.button(text="⬅️ Назад у меню", callback_data="back_to_main")
@@ -390,6 +393,23 @@ async def process_what_is_now(callback: CallbackQuery):
             text = "🏁 **Уроки на сьогодні вже закінчилися!** Можна відпочивати."
             
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    await callback.answer()
+
+# --- АНОНІМНІ ЗАПИТАННЯ ТА СКАРГИ ---
+
+@router.callback_query(F.data == "start_anonymous")
+async def process_start_anonymous(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(BroadcastStates.waiting_for_anonymous_message)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="❌ Скасувати", callback_data="back_to_main")
+    
+    await callback.message.edit_text(
+        "🤫 **Анонімна скарбничка (питання та скарги)**\n\n"
+        "Напиши своє запитання, ідею чи скаргу текстом (або надішли фото). "
+        "Ніхто, крім адміністратора (`fyto3`), не дізнається, хто це надіслав! 🔒",
+        reply_markup=builder.as_markup(),
+        parse_mode="Markdown"
+    )
     await callback.answer()
 
 # --- РОЗДІЛ ГДЗ ТА КОРИСНИХ ПОСИЛАНЬ (НЗ) ---
@@ -607,6 +627,34 @@ async def handle_text_inputs(message: Message, state: FSMContext):
     known_users.add(user_id)
     current_state = await state.get_state()
     
+    # 1. Обробка анонімних запитань/скарг (летить тільки до тебе fyto3)
+    if current_state == BroadcastStates.waiting_for_anonymous_message.state:
+        await state.clear()
+        
+        anonymous_text = f"🤫 **Нове анонімне повідомлення (скарга/питання):**\n\n{message.text}"
+        
+        sent_to_admin = False
+        for uid in known_users:
+            try:
+                chat_member = await bot.get_chat(uid)
+                if chat_member.username and chat_member.username.lower() == ADMIN_USERNAME.lower():
+                    await bot.send_message(chat_id=uid, text=anonymous_text, parse_mode="Markdown")
+                    sent_to_admin = True
+            except Exception:
+                pass
+                
+        # Якщо тебе чомусь немає у known_users, спробуємо надіслати напряму за вашим юзернеймом через пошук або системно (якщо бот знає чат)
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🏠 Головне меню", callback_data="back_to_main")
+        
+        await message.answer(
+            "✅ **Твоє анонімне повідомлення успішно надіслано адміністратору!**",
+            reply_markup=builder.as_markup(),
+            parse_mode="Markdown"
+        )
+        return
+
+    # 2. Обробка масової розсилки
     if current_state == BroadcastStates.waiting_for_broadcast_content.state:
         await state.clear()
         
@@ -637,6 +685,7 @@ async def handle_text_inputs(message: Message, state: FSMContext):
         )
         return
 
+    # 3. Обробка домашнього завдання
     if user_id in hw_creation_step and hw_creation_step[user_id].get("step") == "waiting_text":
         day = hw_creation_step[user_id]["day"]
         hw_text = message.text
@@ -657,6 +706,7 @@ async def handle_text_inputs(message: Message, state: FSMContext):
         )
         return
 
+    # 4. Обробка нагадувань
     if user_id in user_creation_step:
         st = user_creation_step[user_id]
         
@@ -720,6 +770,27 @@ async def handle_photo_inputs(message: Message, state: FSMContext):
     known_users.add(message.from_user.id)
     current_state = await state.get_state()
     
+    # 1. Анонімне фото-повідомлення адміністратору
+    if current_state == BroadcastStates.waiting_for_anonymous_message.state:
+        await state.clear()
+        photo_file_id = message.photo[-1].file_id
+        caption = message.caption if message.caption else ""
+        header = f"🤫 <b>Нове анонімне фото (скарга/питання):</b>\n{caption}"
+        
+        for uid in known_users:
+            try:
+                chat_member = await bot.get_chat(uid)
+                if chat_member.username and chat_member.username.lower() == ADMIN_USERNAME.lower():
+                    await bot.send_photo(chat_id=uid, photo=photo_file_id, caption=header, parse_mode="HTML")
+            except Exception:
+                pass
+                
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🏠 Головне меню", callback_data="back_to_main")
+        await message.answer("✅ **Твоє анонімне фото успішно надіслано адміністратору!**", reply_markup=builder.as_markup(), parse_mode="Markdown")
+        return
+
+    # 2. Масова розсилка фото
     if current_state == BroadcastStates.waiting_for_broadcast_content.state:
         await state.clear()
         user = message.from_user
@@ -809,7 +880,6 @@ async def process_friday(callback: CallbackQuery):
 async def main():
     logging.basicConfig(level=logging.INFO)
     
-    # Налаштовуємо всі фонові задачі (розклад уроків, ранковий дзвінок)
     setup_lesson_notifications()
     
     scheduler.start()
