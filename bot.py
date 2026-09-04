@@ -29,13 +29,20 @@ user_creation_step = {}  # Кроки створення нагадування
 homework_list = []       # Список ДЗ
 hw_creation_step = {}    # Кроки запису ДЗ
 
+# Бази даних для Рейтингу доброти
+kindness_ratings = {}    # {user_id: {"name": "Ім'я", "username": "user", "score": 0}}
+user_votes_history = {}  # {(from_user_id, target_user_id): "like"/"dislike"}
+
 # База всіх користувачів, які колись запускали бота
 known_users = set()
 
-# Стани для FSM (режим масового розсилання та анонімних повідомлень)
+# Стани для FSM
 class BroadcastStates(StatesGroup):
     waiting_for_broadcast_content = State()
     waiting_for_anonymous_message = State()
+
+class RatingStates(StatesGroup):
+    waiting_for_username = State()
 
 # Словник вчителів за предметами
 TEACHERS = {
@@ -103,7 +110,7 @@ def get_subject_with_emoji(name: str) -> str:
     else:
         return f"📖 {name}"
 
-# --- НОВА ЛОГІКА ЧЕРГУВАНЬ ПАРТ (Цикл 1-15, сьогодні = 3) ---
+# --- ЛОГІКА ЧЕРГУВАНЬ ПАРТ (Цикл 1-15, сьогодні = 3) ---
 def get_duty_desk_info(target_date=None):
     if target_date is None:
         target_date = datetime.now()
@@ -113,11 +120,10 @@ def get_duty_desk_info(target_date=None):
     if weekday >= 5:
         return "Вихідний день (субота або неділя). Чергових немає! 🎉"
     
-    # Базова опорна дата: сьогодні (П'ятниця, 4 вересня 2026 р.) має парту №3
+    # Опорна дата: сьогодні (п'ятниця, 4 вересня 2026 р.) має парту №3
     anchor_date = datetime(2026, 9, 4)
     anchor_desk = 3
     
-    # Рахуємо кількість навчальних днів (Пн-Пт) між опорною датою та цільовою
     curr = anchor_date.date()
     target = target_date.date()
     
@@ -135,7 +141,6 @@ def get_duty_desk_info(target_date=None):
                 school_days_diff -= 1
             d -= timedelta(days=1)
             
-    # Вираховуємо номер парти в межах від 1 до 15 з урахуванням циклу
     desk_number = ((anchor_desk - 1 + school_days_diff) % 15) + 1
     
     day_names = ["Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця"]
@@ -243,7 +248,7 @@ async def send_automatic_lesson_notification(day_index: int, lesson_num: str):
         except Exception:
             pass
 
-# Функція ранкового сповіщення о 08:15 перед першим уроком (Пн-Пт)
+# Функція ранкового сповіщення о 08:15
 async def send_morning_greeting():
     if not NOTIFICATIONS_ENABLED:
         return
@@ -268,10 +273,7 @@ async def send_morning_greeting():
         lesson_time = lesson['time']
         if " - " in raw_name:
             parts = raw_name.split(" - ")
-            if current_week == 1:
-                subj = parts[0].strip()
-            else:
-                subj = parts[1].strip()
+            subj = parts[0].strip() if current_week == 1 else parts[1].strip()
             text += f"▫️ **{num}.** {get_subject_with_emoji(subj)} (`{lesson_time}`)\n"
         else:
             text += f"▫️ **{num}.** {get_subject_with_emoji(raw_name)} (`{lesson_time}`)\n"
@@ -315,6 +317,7 @@ def get_main_keyboard():
     builder.button(text="📅 Подивитися розклад", callback_data="show_schedule_menu")
     builder.button(text="📚 Домашнє завдання", callback_data="show_homework")
     builder.button(text="📘 ГДЗ та Посилання (НЗ)", callback_data="show_gdz_menu")
+    builder.button(text="⭐ Рейтинг доброти", callback_data="show_kindness_rating")
     builder.button(text="🤫 Анонімне запитання / скарга", callback_data="start_anonymous")
     builder.button(text="⏰ Нагадування", callback_data="show_reminders")
     builder.button(text="📢 Скинути всім", callback_data="start_broadcast")
@@ -322,7 +325,7 @@ def get_main_keyboard():
     notif_text = "🔕 Вимкнути сповіщення" if NOTIFICATIONS_ENABLED else "🔔 Увімкнути сповіщення"
     builder.button(text=notif_text, callback_data="toggle_notifications")
     
-    builder.adjust(1, 1, 1, 2, 1, 1, 1, 1, 1)
+    builder.adjust(1, 1, 1, 2, 1, 1, 1, 1, 1, 1)
     return builder.as_markup()
 
 def get_cancel_broadcast_kb():
@@ -374,8 +377,7 @@ async def process_toggle_notifications(callback: CallbackQuery):
     )
     await callback.answer("Статус сповіщень змінено!")
 
-# --- ЛОГІКА КНОПКИ "ХТО ЧЕРГОВИЙ?" ---
-
+# --- ХТО ЧЕРГОВИЙ ---
 @router.callback_query(F.data == "who_is_duty")
 async def process_who_is_duty(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
@@ -387,8 +389,7 @@ async def process_who_is_duty(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
     await callback.answer()
 
-# --- ЛОГІКА КНОПКИ "ЩО ЗАРАЗ?" ---
-
+# --- ЩО ЗАРАЗ ---
 @router.callback_query(F.data == "what_is_now")
 async def process_what_is_now(callback: CallbackQuery):
     now = datetime.now()
@@ -447,8 +448,132 @@ async def process_what_is_now(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
     await callback.answer()
 
-# --- АНОНІМНІ ЗАПИТАННЯ ТА СКАРГИ ---
+# --- РЕЙТИНГ ДОБРОТИ ---
+@router.callback_query(F.data == "show_kindness_rating")
+async def process_kindness_rating(callback: CallbackQuery):
+    builder = InlineKeyboardBuilder()
+    builder.button(text="👍 Оцінити людину", callback_data="rate_someone_start")
+    builder.button(text="⬅️ Назад у меню", callback_data="back_to_main")
+    builder.adjust(1)
+    
+    text = "⭐ **Рейтинг доброти та шкідливості**\n\n"
+    
+    if not kindness_ratings:
+        text += "_Тут поки що порожньо. Стань першим, кого оцінять!_\n"
+    else:
+        sorted_users = sorted(kindness_ratings.values(), key=lambda x: x['score'], reverse=True)
+        
+        for i, u_data in enumerate(sorted_users[:10], start=1):
+            medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
+            uname = f"@{u_data['username']}" if u_data['username'] else u_data['name']
+            score = u_data['score']
+            score_str = f"+{score}" if score > 0 else str(score)
+            text += f"{medal} **{uname}** — `{score_str}` балів\n"
+            
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    await callback.answer()
 
+@router.callback_query(F.data == "rate_someone_start")
+async def process_rate_start(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(RatingStates.waiting_for_username)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="❌ Скасувати", callback_data="show_kindness_rating")
+    
+    await callback.message.edit_text(
+        "✍️ **Введи юзернейм людини** (наприклад, `@fyto3` або просто тег), якій хочеш змінити рейтинг:",
+        reply_markup=builder.as_markup(),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+@router.message(RatingStates.waiting_for_username)
+async def process_target_username(message: Message, state: FSMContext):
+    target_input = message.text.strip().lstrip("@")
+    if not target_input:
+        await message.answer("❌ Некоректне ім'я. Спробуй ще раз:")
+        return
+        
+    await state.clear()
+    
+    builder = InlineKeyboardBuilder()
+    builder.button(text="❤️ Лайк (+1)", callback_data=f"rate_val_like_{target_input}")
+    builder.button(text="💩 Дизлайк (-1)", callback_data=f"rate_val_dislike_{target_input}")
+    builder.button(text="⬅️ Назад", callback_data="show_kindness_rating")
+    builder.adjust(2, 1)
+    
+    await message.answer(
+        f"Оцінюємо користувача: **@{target_input}**\n\nОбери реакцію:",
+        reply_markup=builder.as_markup(),
+        parse_mode="Markdown"
+    )
+
+@router.callback_query(F.data.startswith("rate_val_"))
+async def process_rate_value(callback: CallbackQuery):
+    parts = callback.data.split("_")
+    action = parts[2]
+    target_username = parts[3].lower()
+    voter_id = callback.from_user.id
+    
+    target_user_key = None
+    for uid, data in kindness_ratings.items():
+        if data['username'].lower() == target_username:
+            target_user_key = uid
+            break
+            
+    if not target_user_key:
+        target_user_key = abs(hash(target_username)) % (10 ** 8)
+        kindness_ratings[target_user_key] = {
+            "name": target_username,
+            "username": target_username,
+            "score": 0
+        }
+        
+    vote_key = (voter_id, target_user_key)
+    previous_vote = user_votes_history.get(vote_key)
+    
+    score_change = 0
+    if action == "like":
+        if previous_vote == "like":
+            await callback.answer("⚠️ Ти вже ставив лайк цій людині!", show_alert=True)
+            return
+        elif previous_vote == "dislike":
+            score_change = 2
+        else:
+            score_change = 1
+        user_votes_history[vote_key] = "like"
+        
+    elif action == "dislike":
+        if previous_vote == "dislike":
+            await callback.answer("⚠️ Ти вже ставив дизлайк цій людині!", show_alert=True)
+            return
+        elif previous_vote == "like":
+            score_change = -2
+        else:
+            score_change = -1
+        user_votes_history[vote_key] = "dislike"
+        
+    kindness_ratings[target_user_key]['score'] += score_change
+    action_text = "❤️ поставлено лайк (+1)" if action == "like" else "💩 поставлено дизлайк (-1)"
+    await callback.answer("Успішно! Голос зараховано.", show_alert=False)
+    
+    builder = InlineKeyboardBuilder()
+    builder.button(text="👍 Оцінити іншу людину", callback_data="rate_someone_start")
+    builder.button(text="⬅️ Назад у меню", callback_data="back_to_main")
+    builder.adjust(1)
+    
+    sorted_users = sorted(kindness_ratings.values(), key=lambda x: x['score'], reverse=True)
+    text = f"⭐ **Оновлений рейтинг доброти**\n(Твоя дія: {action_text} для @{target_username})\n\n"
+    
+    for i, u_data in enumerate(sorted_users[:10], start=1):
+        medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
+        uname = f"@{u_data['username']}" if u_data['username'] else u_data['name']
+        score = u_data['score']
+        score_str = f"+{score}" if score > 0 else str(score)
+        text += f"{medal} **{uname}** — `{score_str}` балів\n"
+        
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+
+# --- АНОНІМНІ ЗАПИТАННЯ ТА СКАРГИ ---
 @router.callback_query(F.data == "start_anonymous")
 async def process_start_anonymous(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BroadcastStates.waiting_for_anonymous_message)
@@ -457,15 +582,14 @@ async def process_start_anonymous(callback: CallbackQuery, state: FSMContext):
     
     await callback.message.edit_text(
         "🤫 **Анонімна скарбничка (питання та скарги)**\n\n"
-        "Напиши своє запитання, ідею чи скаргу текстом (або надішли фото). "
+        "Напиши своє запитання або скаргу текстом (чи надішли фото). "
         "Ніхто, крім адміністратора (`fyto3`), не дізнається, хто це надіслав! 🔒",
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
     await callback.answer()
 
-# --- РОЗДІЛ ГДЗ ТА КОРИСНИХ ПОСИЛАНЬ (НЗ) ---
-
+# --- ГДЗ ТА ПОСИЛАННЯ ---
 @router.callback_query(F.data == "show_gdz_menu")
 async def process_gdz_menu(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
@@ -484,8 +608,7 @@ async def process_gdz_menu(callback: CallbackQuery):
     )
     await callback.answer()
 
-# --- РОЗДІЛ ДОМАШНІХ ЗАВДАНЬ (ДЗ) ---
-
+# --- ДОМАШНІ ЗАВДАННЯ ---
 @router.callback_query(F.data == "show_homework")
 async def process_homework_menu(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
@@ -558,8 +681,7 @@ async def process_delete_homework(callback: CallbackQuery):
     homework_list = [item for item in homework_list if item['id'] != hw_id]
     await process_homework_menu(callback)
 
-# --- РОЗДІЛ НАГАДУВАНЬ ---
-
+# --- НАГАДУВАННЯ ---
 @router.callback_query(F.data == "show_reminders")
 async def process_reminders_menu(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
@@ -658,9 +780,7 @@ async def process_mark_done(callback: CallbackQuery):
             item['done'] = True
     await process_reminders_menu(callback)
 
-
-# --- ЛОГІКА КНОПКИ "СКИНУТИ ВСІМ" (МАСОВА РОЗСИЛКА) ---
-
+# --- МАСОВА РОЗСИЛКА ---
 @router.callback_query(F.data == "start_broadcast")
 async def process_start_broadcast(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BroadcastStates.waiting_for_broadcast_content)
@@ -672,18 +792,15 @@ async def process_start_broadcast(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-
 @router.message(F.text & ~F.text.startswith("/"))
 async def handle_text_inputs(message: Message, state: FSMContext):
     user_id = message.from_user.id
     known_users.add(user_id)
     current_state = await state.get_state()
     
-    # 1. Обробка анонімних запитань/скарг
     if current_state == BroadcastStates.waiting_for_anonymous_message.state:
         await state.clear()
-        
-        anonymous_text = f"🤫 **Нове анонімде повідомлення (скарга/питання):**\n\n{message.text}"
+        anonymous_text = f"🤫 **Нове анонімне повідомлення (скарга/питання):**\n\n{message.text}"
         
         for uid in known_users:
             try:
@@ -703,26 +820,21 @@ async def handle_text_inputs(message: Message, state: FSMContext):
         )
         return
 
-    # 2. Обробка масової розсилки
     if current_state == BroadcastStates.waiting_for_broadcast_content.state:
         await state.clear()
-        
         user = message.from_user
         username_str = f"@{user.username}" if user.username else "немає юзернейму"
         user_link = f"<a href='tg://user?id={user.id}'>{user.first_name}</a>"
         header = f"📢 <b>Повідомлення від {user_link}</b> ({username_str}):\n\n"
-        
         full_text = header + message.text
         
         success_count = 0
-        fail_count = 0
-        
         for uid in known_users:
             try:
                 await bot.send_message(chat_id=uid, text=full_text, parse_mode="HTML")
                 success_count += 1
             except Exception:
-                fail_count += 1
+                pass
                 
         builder = InlineKeyboardBuilder()
         builder.button(text="🏠 Головне меню", callback_data="back_to_main")
@@ -734,7 +846,6 @@ async def handle_text_inputs(message: Message, state: FSMContext):
         )
         return
 
-    # 3. Обробка домашнього завдання
     if user_id in hw_creation_step and hw_creation_step[user_id].get("step") == "waiting_text":
         day = hw_creation_step[user_id]["day"]
         hw_text = message.text
@@ -755,7 +866,6 @@ async def handle_text_inputs(message: Message, state: FSMContext):
         )
         return
 
-    # 4. Обробка нагадувань
     if user_id in user_creation_step:
         st = user_creation_step[user_id]
         
@@ -813,13 +923,11 @@ async def handle_text_inputs(message: Message, state: FSMContext):
                 parse_mode="Markdown"
             )
 
-
 @router.message(F.photo)
 async def handle_photo_inputs(message: Message, state: FSMContext):
     known_users.add(message.from_user.id)
     current_state = await state.get_state()
     
-    # 1. Анонімне фото-повідомлення адміністратору
     if current_state == BroadcastStates.waiting_for_anonymous_message.state:
         await state.clear()
         photo_file_id = message.photo[-1].file_id
@@ -839,7 +947,6 @@ async def handle_photo_inputs(message: Message, state: FSMContext):
         await message.answer("✅ **Твоє анонімне фото успішно надіслано адміністратору!**", reply_markup=builder.as_markup(), parse_mode="Markdown")
         return
 
-    # 2. Масова розсилка фото
     if current_state == BroadcastStates.waiting_for_broadcast_content.state:
         await state.clear()
         user = message.from_user
@@ -859,13 +966,10 @@ async def handle_photo_inputs(message: Message, state: FSMContext):
         builder.button(text="🏠 Головне меню", callback_data="back_to_main")
         await message.answer("✅ **Розсилку фото завершено!**", reply_markup=builder.as_markup(), parse_mode="Markdown")
 
-
 async def send_user_reminder(rem_id: int):
     pass
 
-
-# --- РОЗКЛАД УРОКІВ ---
-
+# --- РОЗКЛАД УРОКІВ (МЕНЮ) ---
 @router.callback_query(F.data == "show_schedule_menu")
 async def process_schedule_menu(callback: CallbackQuery):
     await callback.message.edit_text(
@@ -928,7 +1032,6 @@ async def process_friday(callback: CallbackQuery):
 
 async def main():
     logging.basicConfig(level=logging.INFO)
-    
     setup_lesson_notifications()
     
     scheduler.start()
