@@ -103,6 +103,46 @@ def get_subject_with_emoji(name: str) -> str:
     else:
         return f"📖 {name}"
 
+# --- ЛОГІКА РОЗРАХУНКУ ЧЕРГОВОЇ ПАРТИ ---
+def get_duty_desk_info(target_date=None):
+    """
+    Рахує чергову парту. 
+    Базова умова: у понеділок (робочий день 0) чергує 3 парта.
+    Далі кожен робочий день (Пн-Пт) додається +1 парта до 15, після чого цикл іде знову з 3.
+    Вихідні (Сб, НД) не враховуються у зміні черги.
+    """
+    if target_date is None:
+        target_date = datetime.now()
+    
+    weekday = target_date.weekday() # 0-Пн, 1-Вт, 2-Ср, 3-Чт, 4-Пт, 5-Сб, 6-Нд
+    
+    if weekday >= 5:
+        return "Вихідний день (субота або неділя). Чергових немає! 🎉"
+    
+    # Вираховуємо загальну кількість навчальних днів, що минули від певної точки, 
+    # або прив'язуємось до номера тижня року + поточний день тижня для стабільного циклу.
+    # Оскільки цикл складається з парт від 3 до 15 (включно це 13 парт: 3,4,5,6,7,8,9,10,11,12,13,14,15),
+    # порахуємо загальну кількість навчальних днів (Пн-Пт) від початку року (або фіксованої дати).
+    
+    start_of_year = datetime(target_date.year, 1, 1)
+    
+    # Рахуємо скільки повних тижнів і днів пройшло
+    total_school_days = 0
+    curr = start_of_year
+    while curr <= target_date:
+        if curr.weekday() < 5:
+            total_school_days += 1
+        curr = datetime.fromordinal(curr.toordinal() + 1)
+        
+    # Базова парта за умовою: у понеділок (якщо це перший день розрахунку) була 3 парта.
+    # Зробимо так, щоб формула давала правильний зсув:
+    # Початок відліку: 3 парта. 
+    # Формула циклу від 3 до 15 (13 варіантів):
+    desk_number = 3 + ((total_school_days - 1) % 13)
+    
+    day_names = ["Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця"]
+    return f"🏫 Сьогодні **{day_names[weekday]}**.\n🧹 Чергова парта на сьогодні: **{desk_number} парта** (діапазон парт: від 3 до 15)."
+
 # РОЗКЛАД УРОКІВ
 MONDAY_SCHEDULE = {
     "1": {"time": "08:30 - 09:15", "name": "Англ. мова"},
@@ -273,6 +313,7 @@ def setup_lesson_notifications():
 def get_main_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="🔍 Що зараз?", callback_data="what_is_now")
+    builder.button(text="🧹 Хто черговий?", callback_data="who_is_duty")
     builder.button(text="📅 Подивитися розклад", callback_data="show_schedule_menu")
     builder.button(text="📚 Домашнє завдання", callback_data="show_homework")
     builder.button(text="📘 ГДЗ та Посилання (НЗ)", callback_data="show_gdz_menu")
@@ -283,7 +324,7 @@ def get_main_keyboard():
     notif_text = "🔕 Вимкнути сповіщення" if NOTIFICATIONS_ENABLED else "🔔 Увімкнути сповіщення"
     builder.button(text=notif_text, callback_data="toggle_notifications")
     
-    builder.adjust(1, 1, 2, 1, 1, 1, 1, 1)
+    builder.adjust(1, 1, 1, 2, 1, 1, 1, 1, 1)
     return builder.as_markup()
 
 def get_cancel_broadcast_kb():
@@ -334,6 +375,19 @@ async def process_toggle_notifications(callback: CallbackQuery):
         reply_markup=get_main_keyboard()
     )
     await callback.answer("Статус сповіщень змінено!")
+
+# --- ЛОГІКА КНОПКИ "ХТО ЧЕРГОВИЙ?" ---
+
+@router.callback_query(F.data == "who_is_duty")
+async def process_who_is_duty(callback: CallbackQuery):
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⬅️ Назад у меню", callback_data="back_to_main")
+    
+    duty_text = get_duty_desk_info()
+    text = f"🧹 **Графік чергування парт:**\n\n{duty_text}"
+    
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    await callback.answer()
 
 # --- ЛОГІКА КНОПКИ "ЩО ЗАРАЗ?" ---
 
@@ -627,23 +681,20 @@ async def handle_text_inputs(message: Message, state: FSMContext):
     known_users.add(user_id)
     current_state = await state.get_state()
     
-    # 1. Обробка анонімних запитань/скарг (летить тільки до тебе fyto3)
+    # 1. Обробка анонімних запитань/скарг
     if current_state == BroadcastStates.waiting_for_anonymous_message.state:
         await state.clear()
         
         anonymous_text = f"🤫 **Нове анонімне повідомлення (скарга/питання):**\n\n{message.text}"
         
-        sent_to_admin = False
         for uid in known_users:
             try:
                 chat_member = await bot.get_chat(uid)
                 if chat_member.username and chat_member.username.lower() == ADMIN_USERNAME.lower():
                     await bot.send_message(chat_id=uid, text=anonymous_text, parse_mode="Markdown")
-                    sent_to_admin = True
             except Exception:
                 pass
                 
-        # Якщо тебе чомусь немає у known_users, спробуємо надіслати напряму за вашим юзернеймом через пошук або системно (якщо бот знає чат)
         builder = InlineKeyboardBuilder()
         builder.button(text="🏠 Головне меню", callback_data="back_to_main")
         
